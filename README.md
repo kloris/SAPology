@@ -191,3 +191,7 @@ Copyright (c) 2025-2026 Joris van de Vis. All rights reserved.
 **Joris van de Vis** - SAP Security Researcher
 
 - GitHub: [@kloris](https://github.com/kloris)
+
+<img width="1400" height="910" alt="Screenshot 2026-02-11 at 16 45 53" src="https://github.com/user-attachments/assets/5bab7fc9-07e7-4fbb-a928-fe20fa5c52b0" />
+
+
