@@ -20,9 +20,10 @@ SAPology is an **SAP security testing tool** for discovering, fingerprinting, an
 ## Features
 
 - **Two-phase discovery** - Quick pre-scan identifies SAP hosts, full scan enumerates all services
-- **Protocol fingerprinting** - Native parsing of SAP DIAG, RFC, Gateway, Message Server, and ICM protocols
+- **Protocol fingerprinting** - Native parsing of SAP DIAG, RFC, Gateway, Message Server, ICM, P4, and SAP Router protocols
 - **SAPControl interrogation** - Extracts SID, kernel version, instance details, and system topology via SOAP
-- **Vulnerability assessment** - Checks for unprotected gateways (SAPXPG), open Message Server ports, unprotected SAPControl interfaces, SSL/TLS weaknesses, HTTP verb tampering, and known CVEs (including CVE-2025-31324)
+- **System type detection** - Identifies ABAP, Java, ABAP+Java, BusinessObjects, Cloud Connector, Content Server, SAP Router, MDM, and HANA systems
+- **Vulnerability assessment** - Checks for 15+ CVEs and misconfigurations including unprotected gateways (SAPXPG), open Message Server ports, HTTP smuggling, exposed admin consoles, SSL/TLS weaknesses, and HTTP verb tampering
 - **ICM URL scanning** - Tests 1,600+ SAP-specific URL paths per HTTP port for exposed endpoints
 - **Hail Mary mode** - Scans all RFC 1918 private subnets (~17.9M IPs) using async two-phase subnet sweeping
 - **HTML & JSON reporting** - Rich interactive HTML reports and structured JSON exports
@@ -178,6 +179,35 @@ The desktop GUI provides a real-time dashboard with:
 - **Export** - HTML report and JSON export buttons
 - **Cancellation** - Stop a running scan at any point (both Phase 1 and Phase 2)
 
+## Vulnerability Checks
+
+SAPology tests for the following CVEs and misconfigurations during Phase 2 assessment:
+
+| CVE / Check | CVSS | Description |
+|---|---|---|
+| **CVE-2025-31324 / CVE-2025-42999** | 10.0 / 9.1 | Visual Composer unauthenticated file upload + deserialization RCE |
+| **CVE-2022-22536** (ICMAD) | 10.0 | HTTP request smuggling via ICM memory pipe desynchronization |
+| **CVE-2020-6287** (RECON) | 10.0 | SAP LM Configuration Wizard missing authorization |
+| **CVE-2020-6207** | 10.0 | Solution Manager EEM missing authentication |
+| **CVE-2010-5326** | 10.0 | Invoker Servlet unauthenticated code execution |
+| **CVE-2022-41272** | 9.9 | SAP P4 service unauthenticated access (PI/PO JMS Connector) |
+| **CVE-2021-33690** | 9.9 | NWDI CBS server-side request forgery |
+| **CVE-2024-41730** | 9.8 | BusinessObjects SSO token theft via REST API |
+| **CVE-2025-0061** | 8.7 | BusinessObjects BI Launch Pad session hijacking |
+| **CVE-2020-6308** | 5.3 | BusinessObjects server-side request forgery |
+| **CVE-2021-21475** | -- | MDM missing authorization check |
+| **CVE-2021-21482** | -- | MDM information disclosure |
+| Gateway SAPXPG RCE | -- | Unprotected gateway allows OS command execution |
+| Message Server ACL | -- | Internal MS port / monitor accessible from network |
+| SAPControl exposure | -- | Unprotected SOAP management interface |
+| BO CMC exposed | -- | BusinessObjects admin console accessible from network |
+| BO CMS port exposed | -- | CMS port reachable (CVE-2026-0485 / CVE-2026-0490) |
+| Cloud Connector exposed | -- | Administration port accessible from network |
+| HANA SQL port exposed | -- | Database ports accessible from network |
+| SSL/TLS weaknesses | -- | SSLv3, TLS 1.0/1.1, self-signed certificates |
+| HTTP verb tampering | -- | Authentication bypass via HEAD/OPTIONS methods |
+| Info disclosure | -- | /sap/public/info endpoint exposing system details |
+
 ## Disclaimer
 
 This tool is intended for **authorized security testing and assessment only**. Only use SAPology against systems you have explicit permission to test. Unauthorized scanning of computer systems is illegal in most jurisdictions.
@@ -185,6 +215,20 @@ This tool is intended for **authorized security testing and assessment only**. O
 ## License
 
 Copyright (c) 2025-2026 Joris van de Vis. All rights reserved.
+
+## Credits & Acknowledgments
+
+This tool builds on the work of several SAP security researchers and open-source projects:
+
+| Project | Author(s) | Reference |
+|---|---|---|
+| [pysap](https://github.com/OWASP/pysap) | Martin Gallo (SecureAuth / OWASP) | SAP protocol dissection library (NI, Diag, MS, RFC, Router) |
+| [SAP Gateway RCE](https://github.com/chipik/SAP_GW_RCE_exploit) | Dmitry Chastuhin ([@_chipik](https://github.com/chipik)) | Gateway RCE via misconfigured ACLs (SAPXPG) |
+| [SAP Message Server PoC](https://github.com/gelim/sap_ms) | Mathieu Geli & Dmitry Chastuhin | MS attack tools ("SAP Gateway to Heaven", OPCDE 2019) |
+| [SAP Nmap Probes](https://github.com/gelim/nmap-sap) | Mathieu Geli & Michael Medvedev (ERPScan) | Nmap service probes for SAP fingerprinting (DIAG, Router, P4) |
+| [SAP RECON](https://github.com/chipik/SAP_RECON) | Dmitry Chastuhin, Pablo Artuso, Yvan 'iggy' G | PoC for CVE-2020-6287 (CVSS 10.0) |
+| [Onapsis Research Labs](https://onapsis.com/research) | Martin Doyhenard et al. | ICMAD vulnerability research (CVE-2022-22536, CVSS 10.0) |
+| [SEC Consult](https://sec-consult.com) | Fabian Hagg | CVE-2022-41272 - SAP P4 service unauthenticated access (CVSS 9.9) |
 
 ## Author
 

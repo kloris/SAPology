@@ -60,14 +60,27 @@ Credits & Acknowledgments:
   SAP Nmap Probes - Mathieu Geli (@gelfrk) & Michael Medvedev (ERPScan)
     https://github.com/gelim/nmap-sap
     Custom Nmap service probes for SAP service fingerprinting (Diag,
-    RFC Gateway, Message Server, SAP Router, Enqueue). Reference for
-    SAP port definitions and service identification.
+    RFC Gateway, Message Server, SAP Router, P4, Enqueue). Reference for
+    SAP port definitions, service identification, and protocol-level probes
+    (DIAG init, SAProuter 4-null-bytes, P4 SAPP4 probe).
 
   SAP RECON (CVE-2020-6287) - Dmitry Chastuhin (@_chipik)
     https://github.com/chipik/SAP_RECON
     PoC for CVE-2020-6287 (RECON) - SAP LM Configuration Wizard missing
     authorization check. Original finding by Pablo Artuso (@lmkalg) and
     Yvan 'iggy' G (@_1ggy). Reference for CTCWebService vulnerability detection.
+
+  Onapsis Research Labs
+    https://onapsis.com/research
+    SAP security research including ICMAD vulnerabilities (CVE-2022-22536,
+    CVSS 10.0) discovered by Martin Doyhenard. Reference for HTTP request
+    smuggling detection via ICM memory pipe desynchronization.
+
+  SEC Consult Vulnerability Lab - Fabian Hagg
+    https://sec-consult.com
+    CVE-2022-41272 (CVSS 9.9) - Unauthenticated access to SAP NetWeaver
+    P4 service (JMS Connector). Published as SEC Consult SA-20230110-0.
+    Reference for P4 protocol vulnerability detection.
 """
 
 import sys
@@ -191,7 +204,12 @@ SAP_FIXED_PORTS = {
     8443:  "HTTPS (alt)",
     1128:  "SAPHostControl HTTP",
     1129:  "SAPHostControl HTTPS",
+    3299:  "SAP Router",
+    1090:  "SAP Content Server HTTP",
+    1091:  "SAP Content Server HTTPS",
+    6400:  "SAP BusinessObjects CMS",
     59950: "SAP MDM Server",
+    44300: "SAP Web Dispatcher HTTPS",
 }
 
 # Well-known non-SAP ports that collide with SAP port formulas.
@@ -217,6 +235,24 @@ SAP_URL_PATHS = [
     ("/sap/hana/xs/formLogin", "HANA XS login"),
     ("/sap/hana/xs/admin", "HANA XS admin"),
     ("/sap/hana/ide", "HANA Web IDE"),
+    ("/EemAdminService/EemAdmin", "CVE-2020-6207 Solution Manager EEM"),
+    ("/servlet/com.sap.ctc.util.ConfigServlet", "CVE-2010-5326 Invoker Servlet"),
+    ("/tc.CBS.Appl/tcspseudo", "CVE-2021-33690 NWDI CBS"),
+    ("/AdminTools/querybuilder/logon", "CVE-2020-6308 BusinessObjects SSRF"),
+    ("/BOE/CMC/", "BusinessObjects Central Management Console"),
+    ("/BOE/BI", "BusinessObjects BI Launch Pad"),
+    ("/ContentServer/ContentServer.dll?serverInfo", "SAP Content Server"),
+    ("/nwa", "NetWeaver Administrator (NWA)"),
+    ("/nwa/sysinfo", "NetWeaver Administrator System Info"),
+    ("/uddi/api/", "UDDI Directory API"),
+    ("/sap/bc/ui2/flp", "Fiori Launchpad"),
+    ("/sap/wdisp/admin/public/index.html", "Web Dispatcher Admin (info disclosure)"),
+    ("/b1s/v2/", "SAP Business One Service Layer"),
+    ("/dir", "Process Integration Directory"),
+    ("/rep", "Enterprise Service Repository"),
+    ("/sap/opu/odata/iwfnd/catalogservice", "OData Service Catalog"),
+    ("/biprws/logon/long", "BusinessObjects REST API (CVE-2024-41730)"),
+    ("/biprws/v1/", "BusinessObjects REST API v1"),
 ]
 
 # Embedded gzip+base64 compressed SAP ICM URL paths wordlist (1633 paths)
@@ -747,11 +783,22 @@ def build_port_list(instances, quick=False):
             ms_alt = 3900 + inst_nr + 1
             if ms_alt not in NON_SAP_PORTS and ms_alt not in SAP_FIXED_PORTS:
                 ports.append((ms_alt, "ms_internal", inst_str, "Message Server Internal (+1)"))
+            # HANA SQL ports: 3NN13 (SystemDB), 3NN15 (first tenant)
+            hana_sysdb = 30000 + inst_nr * 100 + 13
+            hana_tenant = 30000 + inst_nr * 100 + 15
+            for hp, hdesc in ((hana_sysdb, "HANA SQL SystemDB"),
+                              (hana_tenant, "HANA SQL Tenant")):
+                if hp not in NON_SAP_PORTS and hp not in SAP_FIXED_PORTS:
+                    ports.append((hp, "hana_sql", inst_str, hdesc))
     if quick:
-        # Also probe SAPHostControl fixed ports (1128/1129) to detect hosts
-        # that only expose HostControl (no DIAG/GW/SAPControl)
+        # Also probe fixed ports to detect hosts that only expose
+        # HostControl, BusinessObjects, Router, or Content Server
         ports.append((1128, "fixed", "XX", "SAPHostControl HTTP"))
         ports.append((1129, "fixed", "XX", "SAPHostControl HTTPS"))
+        ports.append((6400, "bo_cms", "XX", "SAP BusinessObjects CMS"))
+        ports.append((8080, "fixed", "XX", "SAP Web (alt HTTP)"))
+        ports.append((3299, "saprouter", "XX", "SAP Router"))
+        ports.append((1090, "content_server", "XX", "SAP Content Server HTTP"))
     else:
         # Add fixed ports
         for port, desc in SAP_FIXED_PORTS.items():
@@ -795,7 +842,8 @@ def scan_sap_ports(host, instances, timeout=3, threads=20, verbose=False,
     # Skip verification in quick mode - it's a liveness pre-scan only;
     # the full scan will verify properly without parallel interference
     if not quick:
-        diag_ports = [p for p in open_ports if 3200 <= p <= 3299]
+        diag_ports = [p for p in open_ports if 3200 <= p <= 3299
+                      and p not in SAP_FIXED_PORTS]
         if diag_ports:
             # Let the dispatcher recover from the connection flood before probing
             time.sleep(2)
@@ -912,7 +960,8 @@ def fingerprint_icm(host, port, timeout=3, use_ssl=False):
         info["accessible"] = True
         info["status_code"] = r.status_code
         info["server"] = r.headers.get("server", "")
-        if "SAP" in info["server"] or "ICM" in info["server"]:
+        if ("SAP" in info["server"] or "ICM" in info["server"]
+                or "Cloud Connector" in info["server"]):
             info["is_sap"] = True
         # Detect "Illegal SSL request" - port requires SSL but we connected via HTTP
         if not use_ssl and r.status_code == 400:
@@ -1120,6 +1169,149 @@ def fingerprint_mdm(host, port, timeout=3):
             sock.close()
         except Exception:
             pass
+    return info
+
+
+def fingerprint_bo_web(host, port, use_ssl=False, timeout=3):
+    """Check if an HTTP port serves SAP BusinessObjects content.
+
+    Probes /BOE/CMC/ and /BOE/BI to identify BusinessObjects BI Platform
+    web servers (typically on port 8080 or 8443).
+    """
+    info = {"type": "businessobjects", "accessible": False}
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        for path in ("/BOE/CMC/", "/BOE/BI"):
+            try:
+                r = requests.get(
+                    "%s://%s:%d%s" % (scheme, host, port, path),
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=timeout,
+                    verify=False,
+                    allow_redirects=True,
+                )
+                if r.status_code in (200, 301, 302):
+                    body = r.text.lower()
+                    if any(kw in body for kw in (
+                        "businessobjects", "boe", "sap logon",
+                        "bi launch", "central management",
+                        "logon/start.do", "infoview")):
+                        info["accessible"] = True
+                        info["path"] = path
+                        info["scheme"] = scheme
+                        info["server"] = r.headers.get("Server", "")
+                        return info
+                    # Even without keywords, a non-404 on /BOE/ is strong signal
+                    if r.status_code == 200 and "/boe" in r.url.lower():
+                        info["accessible"] = True
+                        info["path"] = path
+                        info["scheme"] = scheme
+                        info["server"] = r.headers.get("Server", "")
+                        return info
+            except RequestException:
+                continue
+    return info
+
+
+def fingerprint_content_server(host, port, use_ssl=False, timeout=3):
+    """Check if a port serves SAP Content Server."""
+    info = {"type": "content_server", "accessible": False}
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        try:
+            r = requests.get(
+                "%s://%s:%d/ContentServer/ContentServer.dll?serverInfo"
+                % (scheme, host, port),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=timeout,
+                verify=False,
+                allow_redirects=False,
+            )
+            if r.status_code == 200 and ("content" in r.text.lower()
+                                          or "server" in r.text.lower()):
+                info["accessible"] = True
+                info["scheme"] = scheme
+                info["server"] = r.headers.get("Server", "")
+                return info
+        except RequestException:
+            continue
+    return info
+
+
+def fingerprint_saprouter(host, port, timeout=3):
+    """Fingerprint SAP Router using nmap-sap probe (4 null bytes).
+
+    Primary probe: send \\x00\\x00\\x00\\x00 (nmap-sap SAProuter probe from
+    gelim/nmap-sap). SAProuters respond with a message containing the string
+    "SAProuter", optionally followed by version and hostname.
+
+    Fallback: NI_ROUTE admin info request (type 5) which may yield version
+    details on routers that allow admin queries.
+    """
+    info = {"type": "saprouter", "accessible": False}
+
+    # --- Primary: nmap-sap 4-null-bytes probe ---
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        info["accessible"] = True
+        sock.sendall(b"\x00\x00\x00\x00")
+        resp = b""
+        try:
+            while len(resp) < 4096:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                resp += chunk
+        except socket.timeout:
+            pass
+        sock.close()
+        if resp and b"SAProuter" in resp:
+            info["confirmed"] = True
+            # Try to extract version and hostname:
+            # "SAProuter 40.4 on 'hostname'"
+            m = re.search(rb"SAProuter\s+([\d.]+)\s+on\s+'(\w+)'", resp)
+            if m:
+                info["version"] = m.group(1).decode()
+                info["hostname"] = m.group(2).decode()
+            else:
+                m = re.search(rb"SAProuter\s+([\d.]+)", resp)
+                if m:
+                    info["version"] = m.group(1).decode()
+            return info
+    except (socket.error, OSError):
+        pass
+
+    # --- Fallback: NI_ROUTE admin info request ---
+    if info["accessible"] and not info.get("confirmed"):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((host, port))
+            # NI header: 4 bytes big-endian length + payload
+            # Route info: "NI_ROUTE\0" + admin cmd (type=5)
+            admin_info_req = b"NI_ROUTE\x00\x02\x00\x05"
+            ni_header = struct.pack(">I", len(admin_info_req))
+            sock.sendall(ni_header + admin_info_req)
+            resp = b""
+            try:
+                while len(resp) < 4096:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    resp += chunk
+            except socket.timeout:
+                pass
+            sock.close()
+            if resp and b"SAProuter" in resp:
+                info["confirmed"] = True
+                m = re.search(rb'SAProuter\s+([\d.]+)', resp)
+                if m:
+                    info["version"] = m.group(1).decode()
+        except (socket.error, OSError):
+            pass
+
     return info
 
 
@@ -2308,17 +2500,20 @@ def check_cve_2025_31324(host, port, use_ssl=False, timeout=5):
                 if "sapcontrol" in body or "wsdl" in body:
                     break  # SAPControl generic response, not VC
                 finding = Finding(
-                    name="CVE-2025-31324 - Visual Composer Unauthenticated Upload",
+                    name="CVE-2025-31324 / CVE-2025-42999 - Visual Composer Unauthenticated Upload",
                     severity=Severity.CRITICAL,
                     description=(
                         "The /developmentserver/metadatauploader endpoint on port %d "
                         "is accessible without authentication (HTTP %d). This allows "
-                        "unauthenticated file upload leading to Remote Code Execution." % (port, r.status_code)
+                        "unauthenticated file upload leading to Remote Code Execution "
+                        "(CVE-2025-31324, CVSS 10.0). When chained with the "
+                        "deserialization flaw CVE-2025-42999 (CVSS 9.1), full "
+                        "unauthenticated RCE is achieved." % (port, r.status_code)
                     ),
                     remediation=(
-                        "Apply SAP Security Note 3594142 immediately. As a workaround, "
-                        "disable Visual Composer or restrict access to "
-                        "/developmentserver/* paths."
+                        "Apply SAP Security Notes 3594142 and 3604119 immediately. "
+                        "As a workaround, disable Visual Composer or restrict access "
+                        "to /developmentserver/* paths."
                     ),
                     detail="GET %s://.../developmentserver/metadatauploader returned HTTP %d" % (scheme, r.status_code),
                     port=port,
@@ -2723,6 +2918,596 @@ def check_cve_2021_21482(mdm_version_str):
         detail="Detected: %s" % mdm_version_str,
         port=59950,
     )
+
+
+def check_cve_2022_22536(host, port, use_ssl=False, timeout=5):
+    """Check for CVE-2022-22536 (ICMAD - HTTP Request Smuggling).
+
+    Based on the Onapsis ICMAD scanner methodology. Sends a padded HTTP
+    request to detect memory pipe desynchronization in vulnerable SAP ICM.
+    Detection is safe and non-destructive (no data exfiltration or RCE).
+    """
+    finding = None
+
+    # Step 1: Validate target serves SAP content (confirms it's an SAP ICM)
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    sap_resource = None
+    working_ssl = None
+
+    test_paths = [
+        "/sap/admin/public/default.html?aaa",
+        "/sap/public/bc/ur/Login/assets/corbu/sap_logo.png",
+    ]
+
+    for scheme in schemes:
+        for path in test_paths:
+            try:
+                r = requests.get(
+                    "%s://%s:%d%s" % (scheme, host, port, path),
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=timeout,
+                    verify=False,
+                    allow_redirects=False,
+                )
+                if r.status_code == 200:
+                    sap_resource = path
+                    working_ssl = (scheme == "https")
+                    break
+            except RequestException:
+                continue
+        if sap_resource:
+            break
+
+    if not sap_resource:
+        return None
+
+    # Step 2: Send smuggling probe via raw socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout + 3)
+        sock.connect((host, port))
+
+        if working_ssl:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            sock = ctx.wrap_socket(sock, server_hostname=host)
+
+        host_hdr = "%s:%d" % (host, port)
+        padding = b"A" * 82642
+
+        # Main request with oversized Content-Length
+        main_req = (
+            "GET %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "Content-Length: 82646\r\n"
+            "Connection: keep-alive\r\n"
+            "\r\n" % (sap_resource, host_hdr)
+        ).encode()
+
+        # Smuggled second request appended after padding + CRLF separators
+        smuggled = (
+            "GET %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "\r\n" % (sap_resource, host_hdr)
+        ).encode()
+
+        payload = main_req + padding + b"\r\n\r\n" + smuggled
+        sock.sendall(payload)
+
+        # Read response (may contain multiple HTTP responses if vulnerable)
+        response = b""
+        try:
+            while len(response) < 65536:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+        except socket.timeout:
+            pass
+
+        sock.close()
+
+        # Count HTTP response status lines
+        status_matches = re.findall(rb'HTTP/\S+ (\d{3}) ', response)
+
+        if len(status_matches) > 1:
+            second_status = int(status_matches[1])
+            if second_status == 400 or (500 <= second_status < 600):
+                finding = Finding(
+                    name="CVE-2022-22536 - ICMAD (HTTP Request Smuggling)",
+                    severity=Severity.CRITICAL,
+                    description=(
+                        "The SAP Internet Communication Manager (ICM) on port %d "
+                        "is vulnerable to HTTP request smuggling via memory pipe "
+                        "desynchronization (CVSS 10.0). An unauthenticated attacker "
+                        "can exploit this to hijack sessions, poison web caches, or "
+                        "achieve full system compromise with a single HTTP request. "
+                        "Also covers CVE-2022-22532 (ICM HTTP smuggling, CVSS 8.1)."
+                        % port
+                    ),
+                    remediation=(
+                        "Apply SAP Security Notes 3123396 and 3123427 immediately. "
+                        "This affects SAP NetWeaver AS ABAP, AS Java, Content Server, "
+                        "and Web Dispatcher."
+                    ),
+                    detail="Smuggling probe: %d HTTP responses (status codes: %s)" % (
+                        len(status_matches),
+                        ", ".join(m.decode() for m in status_matches)),
+                    port=port,
+                )
+    except (socket.error, ssl.SSLError, OSError):
+        pass
+
+    return finding
+
+
+def check_cve_2020_6207(host, port, use_ssl=False, timeout=5):
+    """Check for CVE-2020-6207 (SAP Solution Manager EEM Missing Auth).
+
+    The EemAdminService endpoint allows unauthenticated access to execute
+    commands on connected SMD agents when exposed without authentication.
+    """
+    finding = None
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        try:
+            r = requests.get(
+                "%s://%s:%d/EemAdminService/EemAdmin" % (scheme, host, port),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=timeout,
+                verify=False,
+                allow_redirects=False,
+            )
+            if r.status_code in (200, 500):
+                body = r.text.lower()
+                # Filter out generic SAPControl responses
+                if "sapcontrol" in body and "eem" not in body:
+                    break
+                finding = Finding(
+                    name="CVE-2020-6207 - Solution Manager EEM Missing Authentication",
+                    severity=Severity.CRITICAL,
+                    description=(
+                        "The /EemAdminService/EemAdmin endpoint on port %d is "
+                        "accessible without authentication (HTTP %d). This allows "
+                        "unauthenticated remote code execution on connected SMD "
+                        "agents via the Solution Manager EEM service (CVSS 10.0)."
+                        % (port, r.status_code)
+                    ),
+                    remediation=(
+                        "Apply SAP Security Note 2890213 immediately. Restrict "
+                        "network access to Solution Manager and disable the EEM "
+                        "service if not required."
+                    ),
+                    detail="GET %s://.../EemAdminService/EemAdmin returned HTTP %d"
+                           % (scheme, r.status_code),
+                    port=port,
+                )
+                break
+            elif r.status_code in (401, 403, 404):
+                break
+        except RequestException:
+            continue
+    return finding
+
+
+def check_cve_2010_5326(host, port, use_ssl=False, timeout=5):
+    """Check for CVE-2010-5326 (SAP Invoker Servlet - unauthenticated RCE).
+
+    The Invoker Servlet on older SAP NetWeaver AS Java (before 7.3) does
+    not require authentication. We check for the /servlet/ path returning
+    a non-404 response, indicating the Invoker Servlet is enabled.
+    """
+    finding = None
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        try:
+            r = requests.get(
+                "%s://%s:%d/servlet/com.sap.ctc.util.ConfigServlet"
+                % (scheme, host, port),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=timeout,
+                verify=False,
+                allow_redirects=False,
+            )
+            if r.status_code == 200:
+                body = r.text.lower()
+                if "sapcontrol" in body or "wsdl" in body:
+                    break
+                finding = Finding(
+                    name="CVE-2010-5326 - Invoker Servlet Unauthenticated Access",
+                    severity=Severity.CRITICAL,
+                    description=(
+                        "The Invoker Servlet on port %d is accessible without "
+                        "authentication (HTTP 200). This allows unauthenticated "
+                        "remote code execution on SAP NetWeaver AS Java systems "
+                        "prior to version 7.3 (CVSS 10.0). This vulnerability is "
+                        "known to have been actively exploited in the wild." % port
+                    ),
+                    remediation=(
+                        "Apply SAP Security Note 1445998. Disable the Invoker "
+                        "Servlet and restrict access to /servlet/* paths."
+                    ),
+                    detail="GET %s://.../servlet/com.sap.ctc.util.ConfigServlet "
+                           "returned HTTP 200" % scheme,
+                    port=port,
+                )
+                break
+            elif r.status_code in (401, 403, 404):
+                break
+        except RequestException:
+            continue
+    return finding
+
+
+def check_cve_2021_33690(host, port, use_ssl=False, timeout=5):
+    """Check for CVE-2021-33690 (SAP NWDI Component Build Service SSRF).
+
+    The CBS servlet endpoint being accessible indicates SAP NetWeaver
+    Development Infrastructure is exposed and potentially vulnerable
+    to SSRF (CVSS 9.9).
+    """
+    finding = None
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        try:
+            r = requests.get(
+                "%s://%s:%d/tc.CBS.Appl/tcspseudo" % (scheme, host, port),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=timeout,
+                verify=False,
+                allow_redirects=False,
+            )
+            if r.status_code in (200, 405, 500):
+                body = r.text.lower()
+                if "sapcontrol" in body or "wsdl" in body:
+                    break
+                finding = Finding(
+                    name="CVE-2021-33690 - NWDI Component Build Service SSRF",
+                    severity=Severity.CRITICAL,
+                    description=(
+                        "The /tc.CBS.Appl/tcspseudo endpoint on port %d is "
+                        "accessible (HTTP %d). This indicates SAP NetWeaver "
+                        "Development Infrastructure Component Build Service is "
+                        "exposed and may be vulnerable to SSRF allowing internal "
+                        "network access (CVSS 9.9)." % (port, r.status_code)
+                    ),
+                    remediation=(
+                        "Apply SAP Security Note 3075546. Restrict network access "
+                        "to NWDI components and disable CBS if not required."
+                    ),
+                    detail="GET %s://.../tc.CBS.Appl/tcspseudo returned HTTP %d"
+                           % (scheme, r.status_code),
+                    port=port,
+                )
+                break
+            elif r.status_code in (401, 403, 404):
+                break
+        except RequestException:
+            continue
+    return finding
+
+
+def check_cve_2020_6308(host, port, use_ssl=False, timeout=5):
+    """Check for CVE-2020-6308 (SAP BusinessObjects SSRF).
+
+    The querybuilder logon endpoint being accessible without auth indicates
+    potential SSRF via CMS parameter injection.
+    """
+    finding = None
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        try:
+            r = requests.get(
+                "%s://%s:%d/AdminTools/querybuilder/logon"
+                % (scheme, host, port),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=timeout,
+                verify=False,
+                allow_redirects=False,
+            )
+            if r.status_code == 200:
+                body = r.text.lower()
+                if "sapcontrol" in body or "wsdl" in body:
+                    break
+                finding = Finding(
+                    name="CVE-2020-6308 - BusinessObjects SSRF",
+                    severity=Severity.MEDIUM,
+                    description=(
+                        "The /AdminTools/querybuilder/logon endpoint on port %d "
+                        "is accessible (HTTP 200). SAP BusinessObjects BI Platform "
+                        "may be vulnerable to unauthenticated Server-Side Request "
+                        "Forgery via CMS parameter injection (CVSS 5.3)." % port
+                    ),
+                    remediation=(
+                        "Apply SAP Security Note 2943844. Restrict access to "
+                        "/AdminTools/* paths."
+                    ),
+                    detail="GET %s://.../AdminTools/querybuilder/logon returned "
+                           "HTTP 200" % scheme,
+                    port=port,
+                )
+                break
+            elif r.status_code in (401, 403, 404):
+                break
+        except RequestException:
+            continue
+    return finding
+
+
+# ---------------------------------------------------------------------------
+# SAP BusinessObjects vulnerability checks
+# ---------------------------------------------------------------------------
+
+def check_bo_cmc_exposed(host, port, use_ssl=False, timeout=5):
+    """Check if SAP BusinessObjects CMC admin console is accessible.
+
+    The Central Management Console should only be accessible from
+    administrative IP addresses, not from the general network.
+    """
+    finding = None
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        try:
+            r = requests.get(
+                "%s://%s:%d/BOE/CMC/" % (scheme, host, port),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=timeout,
+                verify=False,
+                allow_redirects=True,
+            )
+            if r.status_code == 200:
+                body = r.text.lower()
+                if any(kw in body for kw in (
+                    "businessobjects", "boe", "central management",
+                    "logon", "cms", "sap")):
+                    finding = Finding(
+                        name="SAP BusinessObjects CMC Admin Console Exposed",
+                        severity=Severity.LOW,
+                        description=(
+                            "The SAP BusinessObjects Central Management Console "
+                            "(CMC) on port %d is accessible from the network. The "
+                            "CMC provides full administrative control over the BI "
+                            "platform including user management, server "
+                            "configuration, and content administration." % port
+                        ),
+                        remediation=(
+                            "Restrict access to /BOE/CMC/ to administrative IP "
+                            "addresses only using firewall rules, reverse proxy "
+                            "ACLs, or SAP Web Application Server configuration. "
+                            "The CMC should not be exposed to general users or "
+                            "untrusted networks."
+                        ),
+                        detail="GET %s://.../BOE/CMC/ returned HTTP 200 (admin "
+                               "console accessible)" % scheme,
+                        port=port,
+                    )
+                    break
+            elif r.status_code in (401, 403, 404):
+                break
+        except RequestException:
+            continue
+    return finding
+
+
+def check_cve_2024_41730(host, port, use_ssl=False, timeout=5):
+    """Check for CVE-2024-41730 (SAP BO SSO Token Theft via REST API).
+
+    If the biprws REST API is accessible, attackers can potentially
+    obtain logon tokens via the /biprws/logon/trusted endpoint when
+    SSO Enterprise authentication is enabled (CVSS 9.8).
+
+    Safe detection: only checks if the REST API endpoint exists, does
+    NOT attempt actual token theft.
+    """
+    finding = None
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        try:
+            r = requests.get(
+                "%s://%s:%d/biprws/logon/long" % (scheme, host, port),
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/xml",
+                },
+                timeout=timeout,
+                verify=False,
+                allow_redirects=True,
+            )
+            if r.status_code == 200:
+                body = r.text.lower()
+                if any(kw in body for kw in (
+                    "logontoken", "biprws", "attrs", "logon",
+                    "businessobjects", "enterprise")):
+                    finding = Finding(
+                        name="CVE-2024-41730 - BusinessObjects SSO Token Theft "
+                             "(REST API Exposed)",
+                        severity=Severity.CRITICAL,
+                        description=(
+                            "The SAP BusinessObjects REST API (/biprws/) on port "
+                            "%d is accessible without authentication. If Single "
+                            "Sign-On (SSO) Enterprise authentication is enabled, "
+                            "an attacker can exploit the /biprws/logon/trusted "
+                            "endpoint with a crafted X-SAP-TRUSTED-USER header to "
+                            "obtain a logon token and fully compromise the system "
+                            "(CVSS 9.8). This also enables CVE-2026-0490 (auth "
+                            "bypass and user lockout)." % port
+                        ),
+                        remediation=(
+                            "Apply SAP Security Note 3479478 immediately. Restrict "
+                            "network access to /biprws/* paths. If SSO is not "
+                            "required, disable Enterprise SSO authentication."
+                        ),
+                        detail="GET %s://.../biprws/logon/long returned HTTP 200 "
+                               "(REST API accessible)" % scheme,
+                        port=port,
+                    )
+                    break
+            elif r.status_code in (401, 403, 404):
+                break
+        except RequestException:
+            continue
+    return finding
+
+
+def check_cve_2025_0061(host, port, use_ssl=False, timeout=5):
+    """Check for CVE-2025-0061 (SAP BO Session Hijacking).
+
+    An information disclosure vulnerability allows unauthenticated
+    attackers to hijack user sessions without interaction. Detection
+    checks for exposed BI Launch Pad which is the attack surface.
+    """
+    finding = None
+    schemes = ["https", "http"] if use_ssl else ["http", "https"]
+    for scheme in schemes:
+        try:
+            r = requests.get(
+                "%s://%s:%d/BOE/BI" % (scheme, host, port),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=timeout,
+                verify=False,
+                allow_redirects=True,
+            )
+            if r.status_code == 200:
+                body = r.text.lower()
+                if any(kw in body for kw in (
+                    "bi launch", "businessobjects", "logon",
+                    "boe", "sap", "launchpad")):
+                    finding = Finding(
+                        name="CVE-2025-0061 - BusinessObjects Session Hijacking",
+                        severity=Severity.HIGH,
+                        description=(
+                            "The SAP BusinessObjects BI Launch Pad on port %d is "
+                            "accessible. An information disclosure vulnerability "
+                            "(CVE-2025-0061, CVSS 8.7) allows unauthenticated "
+                            "attackers to hijack user sessions over the network "
+                            "without any user interaction, gaining full read/modify "
+                            "access to application data. Also exposes the system to "
+                            "CVE-2025-23192 (stored XSS in BI Workspace, stealing "
+                            "session data)." % port
+                        ),
+                        remediation=(
+                            "Apply SAP Security Note 3474398 immediately. Restrict "
+                            "network access to /BOE/BI to authorized users only. "
+                            "Implement WAF rules to detect session hijacking "
+                            "attempts."
+                        ),
+                        detail="GET %s://.../BOE/BI returned HTTP 200 "
+                               "(BI Launch Pad accessible)" % scheme,
+                        port=port,
+                    )
+                    break
+            elif r.status_code in (401, 403, 404):
+                break
+        except RequestException:
+            continue
+    return finding
+
+
+def check_bo_cms_network_exposed(host, port, timeout=5):
+    """Check if BusinessObjects CMS port is accessible from network.
+
+    The CMS port (default 6400) being accessible from untrusted networks
+    enables CVE-2026-0485 (CMS DoS via crafted requests causing repeated
+    crashes) and CVE-2026-0490 (authentication bypass via crafted requests
+    locking out legitimate users).
+    """
+    finding = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        sock.close()
+        finding = Finding(
+            name="SAP BusinessObjects CMS Port Exposed "
+                 "(CVE-2026-0485 / CVE-2026-0490)",
+            severity=Severity.MEDIUM,
+            description=(
+                "The SAP BusinessObjects Content Management Server (CMS) on "
+                "port %d is accessible from the network. This exposes the "
+                "system to CVE-2026-0485 (unauthenticated attackers can send "
+                "crafted requests to crash the CMS repeatedly, causing "
+                "persistent service disruptions) and CVE-2026-0490 "
+                "(authentication bypass locking out legitimate users)." % port
+            ),
+            remediation=(
+                "Apply the latest SAP Security Notes for BusinessObjects. "
+                "Restrict access to the CMS port (%d) to only authorized "
+                "application servers and administrative hosts using firewall "
+                "rules. The CMS port should never be exposed to untrusted "
+                "networks." % port
+            ),
+            detail="TCP connect to %s:%d succeeded (CMS port accessible)"
+                   % (host, port),
+            port=port,
+        )
+    except (socket.error, OSError):
+        pass
+    return finding
+
+
+def check_cve_2022_41272(host, port, timeout=5):
+    """Check for CVE-2022-41272 by probing the SAP P4 service.
+
+    CVE-2022-41272 (CVSS 9.9) is an improper access control vulnerability in
+    SAP NetWeaver Process Integration (PI/PO). The P4 protocol on port 5NN04
+    exposes remote functions (JMS Connector Service) that can be called without
+    authentication, allowing unauthenticated attackers to access or modify
+    sensitive data.
+
+    Detection: send the nmap-sap P4 probe and check if the service responds
+    with the P4 protocol signature ("v1").
+    """
+    # nmap-sap SAPP4 probe: q|v1\x18#p#4None:127.0.0.1:33170|
+    p4_probe = b"v1\x18#p#4None:127.0.0.1:33170"
+    finding = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        sock.sendall(p4_probe)
+        resp = b""
+        try:
+            while len(resp) < 4096:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                resp += chunk
+        except socket.timeout:
+            pass
+        sock.close()
+
+        if resp and resp[:2] == b"v1":
+            # P4 service confirmed - extract internal IP if present
+            detail = "P4 service responded on %s:%d (%d bytes)" % (host, port, len(resp))
+            m = re.search(rb"v1.*?:(\d+\.\d+\.\d+\.\d+)", resp)
+            if m:
+                internal_ip = m.group(1).decode()
+                detail += ", internal IP: %s" % internal_ip
+
+            finding = Finding(
+                name="CVE-2022-41272: SAP P4 Service Exposed (Unauthenticated Access)",
+                severity=Severity.CRITICAL,
+                description=(
+                    "The SAP P4 service on port %d is accessible without "
+                    "authentication. CVE-2022-41272 (CVSS 9.9) allows "
+                    "unauthenticated attackers to call remote functions in "
+                    "the JMS Connector Service via the P4 protocol, enabling "
+                    "access to and modification of sensitive data. This affects "
+                    "SAP NetWeaver Process Integration (Java Stack)." % port
+                ),
+                remediation=(
+                    "Apply SAP Security Note 3267780. Restrict network access "
+                    "to P4 ports (5NN04) using firewall rules so that only "
+                    "authorized application servers can reach them. Consider "
+                    "disabling the P4 service if not required."
+                ),
+                detail=detail,
+                port=port,
+            )
+    except (socket.error, OSError):
+        pass
+    return finding
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3235,12 +4020,22 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
       <tr style="border-bottom:1px solid var(--border);">
         <td style="padding:8px;"><a href="https://github.com/gelim/nmap-sap" style="color:var(--accent);">SAP Nmap Probes</a></td>
         <td style="padding:8px; color:var(--text-dim);">Mathieu Geli &amp; Michael Medvedev (ERPScan)</td>
-        <td style="padding:8px; color:var(--text-dim);">Custom Nmap service probes for SAP fingerprinting. Reference for SAP port definitions and service identification.</td>
+        <td style="padding:8px; color:var(--text-dim);">Custom Nmap service probes for SAP fingerprinting (DIAG, SAP Router, P4). Reference for port definitions, service identification, and protocol probes.</td>
       </tr>
-      <tr>
+      <tr style="border-bottom:1px solid var(--border);">
         <td style="padding:8px;"><a href="https://github.com/chipik/SAP_RECON" style="color:var(--accent);">SAP RECON (CVE-2020-6287)</a></td>
         <td style="padding:8px; color:var(--text-dim);">Dmitry Chastuhin (@_chipik), Pablo Artuso, Yvan &apos;iggy&apos; G</td>
         <td style="padding:8px; color:var(--text-dim);">PoC for CVE-2020-6287 (RECON) - SAP LM Configuration Wizard missing authorization check (CVSS 10.0). Reference for CTCWebService vulnerability detection.</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px;"><a href="https://onapsis.com/research" style="color:var(--accent);">Onapsis Research Labs</a></td>
+        <td style="padding:8px; color:var(--text-dim);">Martin Doyhenard et al.</td>
+        <td style="padding:8px; color:var(--text-dim);">ICMAD vulnerability research (CVE-2022-22536, CVSS 10.0). Reference for HTTP request smuggling detection via ICM memory pipe desynchronization.</td>
+      </tr>
+      <tr>
+        <td style="padding:8px;"><a href="https://sec-consult.com" style="color:var(--accent);">SEC Consult Vulnerability Lab</a></td>
+        <td style="padding:8px; color:var(--text-dim);">Fabian Hagg</td>
+        <td style="padding:8px; color:var(--text-dim);">CVE-2022-41272 (CVSS 9.9) - Unauthenticated access to SAP NetWeaver P4 service. Reference for P4 protocol vulnerability detection.</td>
       </tr>
     </tbody>
   </table>
@@ -3902,6 +4697,19 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                         if actual_ssl and "HTTPS" not in instance.ports.get(port, ""):
                             old_desc = instance.ports.get(port, "ICM HTTP")
                             instance.ports[port] = old_desc.replace("HTTP", "HTTPS")
+                    else:
+                        # Not ICM — try BusinessObjects HTTP detection
+                        bo_info = fingerprint_bo_web(target_ip, port, use_ssl, timeout)
+                        if bo_info.get("accessible"):
+                            instance.services["bo_web"] = {
+                                "port": port,
+                                "ssl": bo_info.get("scheme") == "https",
+                                "server": bo_info.get("server", ""),
+                                "path": bo_info.get("path", ""),
+                            }
+                            instance.ports[port] = "SAP BusinessObjects HTTP"
+                            log_verbose("  BusinessObjects web detected on port %d (%s)"
+                                        % (port, bo_info.get("path", "")))
 
                 # Gateway
                 elif "Gateway" in svc_desc:
@@ -4030,6 +4838,49 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                 sys_obj.sid = mdm_sid
                                 sid_found = True
 
+                # SAP BusinessObjects CMS
+                elif "BusinessObjects" in svc_desc:
+                    log_verbose("  Checking BusinessObjects CMS on port %d ..." % port)
+                    try:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(timeout)
+                        sock.connect((target_ip, port))
+                        sock.close()
+                        instance.services["bo_cms"] = {"port": port}
+                        log_verbose("  BusinessObjects CMS confirmed on port %d" % port)
+                    except (socket.error, OSError):
+                        pass
+
+                # SAP Content Server
+                elif "Content Server" in svc_desc:
+                    use_ssl = "HTTPS" in svc_desc
+                    log_verbose("  Checking Content Server on port %d ..." % port)
+                    cs_info = fingerprint_content_server(target_ip, port, use_ssl, timeout)
+                    if cs_info.get("accessible"):
+                        instance.services["content_server"] = {
+                            "port": port, "ssl": use_ssl,
+                            "server": cs_info.get("server", ""),
+                        }
+                    else:
+                        # Port is in Content Server range, register even without HTTP confirm
+                        instance.services["content_server"] = {"port": port, "ssl": use_ssl}
+
+                # SAP Router
+                elif "Router" in svc_desc:
+                    log_verbose("  Checking SAP Router on port %d ..." % port)
+                    rt_info = fingerprint_saprouter(target_ip, port, timeout)
+                    if rt_info.get("confirmed"):
+                        instance.services["saprouter"] = {"port": port}
+                        if rt_info.get("version"):
+                            instance.info["saprouter_version"] = rt_info["version"]
+                        if rt_info.get("hostname") and not sys_obj.hostname:
+                            sys_obj.hostname = rt_info["hostname"]
+                    elif rt_info.get("accessible"):
+                        # TCP connected but SAProuter string not in response;
+                        # register anyway since port 3299 is a known SAP Router port
+                        instance.services["saprouter"] = {"port": port}
+                        log_verbose("  SAP Router on port %d: TCP open, protocol unconfirmed" % port)
+
             sys_obj.instances.append(instance)
 
         # Post-fingerprint validation: remove instances with zero confirmed services.
@@ -4064,14 +4915,38 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     sys_obj.kernel = inst.info["KERNEL_VERSION"]
                     break
 
-        # Detect system type — MDM is exclusive, ABAP+JAVA can combine
+        # Detect system type — some types are exclusive
         is_mdm = False
+        is_bo = False
+        is_cs = False
+        is_router = False
+        is_cloud_connector = False
         for inst in sys_obj.instances:
             if inst.services.get("mdm") and inst.info.get("mdm_version"):
                 is_mdm = True
-                break
-        if is_mdm:
+            if inst.services.get("bo_cms") or inst.services.get("bo_web"):
+                is_bo = True
+            if inst.services.get("content_server"):
+                is_cs = True
+            if inst.services.get("saprouter"):
+                is_router = True
+            icm_svc = inst.services.get("icm")
+            if icm_svc and "cloud connector" in icm_svc.get("server", "").lower():
+                is_cloud_connector = True
+        if is_cloud_connector:
+            sys_obj.system_type = "CLOUD_CONNECTOR"
+        elif is_mdm:
             sys_obj.system_type = "MDM"
+        elif is_bo:
+            sys_obj.system_type = "BUSINESSOBJECTS"
+            if sys_obj.sid == "UNKNOWN":
+                sys_obj.sid = "BO"
+        elif is_cs:
+            sys_obj.system_type = "CONTENT_SERVER"
+        elif is_router:
+            sys_obj.system_type = "SAPROUTER"
+            if sys_obj.sid == "UNKNOWN":
+                sys_obj.sid = "SAPROUTER"
         else:
             type_parts = []
             # ABAP: presence of a DIAG dispatcher port (32XX)
@@ -4137,6 +5012,15 @@ def _get_instance_http_ports(inst):
     return http_ports
 
 
+def _get_instance_p4_ports(inst):
+    """Get list of P4 ports (5NN04) from instance open ports."""
+    p4_ports = []
+    for p in sorted(inst.ports.keys()):
+        if 50004 <= p <= 59904 and (p - 50000) % 100 == 4:
+            p4_ports.append(p)
+    return p4_ports
+
+
 def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                            url_scan=False, url_scan_threads=25, cancel_check=None):
     """Phase 2: Run vulnerability checks against discovered systems.
@@ -4158,6 +5042,11 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
             http_ports = _get_instance_http_ports(inst)
             total_checks += len(http_ports)      # CVE-2020-6287 (RECON)
             total_checks += len(http_ports)      # CVE-2025-31324
+            total_checks += len(http_ports)      # CVE-2022-22536 (ICMAD)
+            total_checks += len(http_ports)      # CVE-2020-6207 (SolMan EEM)
+            total_checks += len(http_ports)      # CVE-2010-5326 (Invoker Servlet)
+            total_checks += len(http_ports)      # CVE-2021-33690 (NWDI CBS)
+            total_checks += len(http_ports)      # CVE-2020-6308 (BO SSRF)
             total_checks += len(http_ports)      # info leak
             if inst.services.get("sapcontrol"):
                 total_checks += 1
@@ -4165,10 +5054,31 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                 total_checks += 1
             if inst.services.get("mdm"):
                 total_checks += 2  # CVE-2021-21475 + CVE-2021-21482
-            # SSL/TLS ports
+            if inst.services.get("bo_web") or inst.services.get("bo_cms"):
+                total_checks += len(http_ports)      # BO CMC exposed
+                total_checks += len(http_ports)      # CVE-2024-41730 (BO SSO token)
+                total_checks += len(http_ports)      # CVE-2025-0061 (BO session hijack)
+            if inst.services.get("bo_cms"):
+                total_checks += 1                    # BO CMS port exposed
+            # CVE-2022-41272 P4 service
+            total_checks += len(_get_instance_p4_ports(inst))
+            # Cloud Connector port exposure
+            _icm_svc = inst.services.get("icm")
+            if _icm_svc and "cloud connector" in _icm_svc.get("server", "").lower():
+                total_checks += 1
+            # HANA SQL ports
+            for p, desc in inst.ports.items():
+                if "HANA SQL" in desc:
+                    total_checks += 1
+            # SSL/TLS ports — count every unique port that will be checked
+            _ssl_count_ports = set()
             for p, desc in inst.ports.items():
                 if "HTTPS" in desc:
-                    total_checks += 1
+                    _ssl_count_ports.add(p)
+            for svc in inst.services.values():
+                if isinstance(svc, dict) and svc.get("ssl") and svc.get("port"):
+                    _ssl_count_ports.add(svc["port"])
+            total_checks += len(_ssl_count_ports)
             if url_scan:
                 total_checks += len(http_ports) * ICM_PATH_COUNT
 
@@ -4290,6 +5200,130 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                 if cancelled():
                     break
 
+                # Check CVE-2022-22536 (ICMAD - HTTP Request Smuggling)
+                # Once found on one port, skip actual check on remaining (but still step)
+                icmad_found = False
+                for port, use_ssl in http_ports:
+                    if cancelled():
+                        break
+                    if not icmad_found:
+                        log_verbose("  Checking CVE-2022-22536 (ICMAD) on %s:%d ..." % (inst.ip, port))
+                        f = check_cve_2022_22536(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                            icmad_found = True
+                    step()
+
+                if cancelled():
+                    break
+
+                # Check CVE-2020-6207 (Solution Manager EEM)
+                for port, use_ssl in http_ports:
+                    if cancelled():
+                        break
+                    log_verbose("  Checking CVE-2020-6207 (SolMan EEM) on %s:%d ..." % (inst.ip, port))
+                    f = check_cve_2020_6207(inst.ip, port, use_ssl, timeout)
+                    if f:
+                        inst.findings.append(f)
+                    step()
+
+                if cancelled():
+                    break
+
+                # Check CVE-2010-5326 (Invoker Servlet)
+                for port, use_ssl in http_ports:
+                    if cancelled():
+                        break
+                    log_verbose("  Checking CVE-2010-5326 (Invoker Servlet) on %s:%d ..." % (inst.ip, port))
+                    f = check_cve_2010_5326(inst.ip, port, use_ssl, timeout)
+                    if f:
+                        inst.findings.append(f)
+                    step()
+
+                if cancelled():
+                    break
+
+                # Check CVE-2021-33690 (NWDI CBS SSRF)
+                for port, use_ssl in http_ports:
+                    if cancelled():
+                        break
+                    log_verbose("  Checking CVE-2021-33690 (NWDI CBS) on %s:%d ..." % (inst.ip, port))
+                    f = check_cve_2021_33690(inst.ip, port, use_ssl, timeout)
+                    if f:
+                        inst.findings.append(f)
+                    step()
+
+                if cancelled():
+                    break
+
+                # Check CVE-2020-6308 (BusinessObjects SSRF)
+                for port, use_ssl in http_ports:
+                    if cancelled():
+                        break
+                    log_verbose("  Checking CVE-2020-6308 (BO SSRF) on %s:%d ..." % (inst.ip, port))
+                    f = check_cve_2020_6308(inst.ip, port, use_ssl, timeout)
+                    if f:
+                        inst.findings.append(f)
+                    step()
+
+                if cancelled():
+                    break
+
+                # -- SAP BusinessObjects-specific checks --
+                is_bo = inst.services.get("bo_web") or inst.services.get("bo_cms")
+                if is_bo:
+                    # Check BO CMC admin console exposure
+                    for port, use_ssl in http_ports:
+                        if cancelled():
+                            break
+                        log_verbose("  Checking BO CMC exposure on %s:%d ..." % (inst.ip, port))
+                        f = check_bo_cmc_exposed(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
+
+                    if cancelled():
+                        break
+
+                    # Check CVE-2024-41730 (SSO Token Theft via REST API)
+                    for port, use_ssl in http_ports:
+                        if cancelled():
+                            break
+                        log_verbose("  Checking CVE-2024-41730 (BO SSO token) on %s:%d ..." % (inst.ip, port))
+                        f = check_cve_2024_41730(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
+
+                    if cancelled():
+                        break
+
+                    # Check CVE-2025-0061 (Session Hijacking via BI Launch Pad)
+                    for port, use_ssl in http_ports:
+                        if cancelled():
+                            break
+                        log_verbose("  Checking CVE-2025-0061 (BO session hijack) on %s:%d ..." % (inst.ip, port))
+                        f = check_cve_2025_0061(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
+
+                    if cancelled():
+                        break
+
+                # Check BO CMS port exposure (CVE-2026-0485 / CVE-2026-0490)
+                bo_cms_svc = inst.services.get("bo_cms")
+                if bo_cms_svc:
+                    cms_port = bo_cms_svc.get("port", 6400)
+                    log_verbose("  Checking BO CMS port exposure on %s:%d ..." % (inst.ip, cms_port))
+                    f = check_bo_cms_network_exposed(inst.ip, cms_port, timeout)
+                    if f:
+                        inst.findings.append(f)
+                    step()
+
+                    if cancelled():
+                        break
+
                 # Check /sap/public/info once (on the first HTTP port that has it)
                 # to avoid duplicate info-disclosure findings for the same instance
                 info_leak_ports = []
@@ -4336,6 +5370,55 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                         inst.findings.append(f)
                     step()
 
+                # CVE-2022-41272: SAP P4 service unauthenticated access
+                p4_ports = _get_instance_p4_ports(inst)
+                if p4_ports:
+                    print("[*] %s - Checking CVE-2022-41272 (P4) on %d port(s) ..." % (
+                        inst_label, len(p4_ports)))
+                for p4_port in p4_ports:
+                    if cancelled():
+                        break
+                    log_verbose("  Checking CVE-2022-41272 (P4) on %s:%d ..." % (inst.ip, p4_port))
+                    f = check_cve_2022_41272(inst.ip, p4_port, timeout)
+                    if f:
+                        inst.findings.append(f)
+                    step()
+
+                if cancelled():
+                    break
+
+                # Cloud Connector port exposure check
+                cc_icm = inst.services.get("icm")
+                if cc_icm and "cloud connector" in cc_icm.get("server", "").lower():
+                    cc_port = cc_icm["port"]
+                    log_verbose("  Cloud Connector detected on %s:%d" % (inst.ip, cc_port))
+                    inst.findings.append(Finding(
+                        name="SAP Cloud Connector Port Exposed",
+                        severity=Severity.LOW,
+                        description=(
+                            "An SAP Cloud Connector administration port (%d) is accessible "
+                            "from the scanning host. The Cloud Connector provides a secure "
+                            "tunnel between cloud applications and on-premise systems. Its "
+                            "administration interface should be restricted to authorized "
+                            "administrators only and not be exposed to the wider network."
+                            % cc_port
+                        ),
+                        remediation=(
+                            "Restrict access to the Cloud Connector administration port "
+                            "(%d) using firewall rules so that only authorized "
+                            "administrators can reach it. The port should not be "
+                            "accessible from untrusted networks or general user "
+                            "segments." % cc_port
+                        ),
+                        detail="Cloud Connector detected via server header on %s:%d"
+                               % (inst.ip, cc_port),
+                        port=cc_port,
+                    ))
+                    step()
+
+                if cancelled():
+                    break
+
                 # MDM vulnerability checks
                 mdm_svc = inst.services.get("mdm")
                 if mdm_svc and not cancelled():
@@ -4355,22 +5438,50 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                 if cancelled():
                     break
 
-                # SSL/TLS version checks on all HTTPS ports
+                # HANA SQL port exposure checks
+                for p, desc in sorted(inst.ports.items()):
+                    if cancelled():
+                        break
+                    if "HANA SQL" in desc:
+                        log_verbose("  HANA SQL port %d (%s) exposed on %s" % (p, desc, inst.ip))
+                        inst.findings.append(Finding(
+                            name="HANA SQL Port Exposed (%s)" % desc,
+                            severity=Severity.LOW,
+                            description=(
+                                "The %s port %d is accessible from the scanning host. "
+                                "HANA SQL ports (3NN13 for SystemDB, 3NN15 for tenant databases) "
+                                "are internal database ports that in many cases should be "
+                                "firewalled and only accessible for a specific group of "
+                                "users and machines (e.g. application servers, database "
+                                "administrators)." % (desc, p)
+                            ),
+                            remediation=(
+                                "Restrict access to HANA SQL port %d using firewall rules "
+                                "so that only authorized application servers and DBA "
+                                "workstations can reach it. The port should not be "
+                                "accessible from untrusted networks or general user "
+                                "segments." % p
+                            ),
+                            detail="TCP port %d (%s) open on %s" % (p, desc, inst.ip),
+                            port=p,
+                        ))
+                        step()
+
+                if cancelled():
+                    break
+
+                # SSL/TLS version checks on every HTTPS port
                 ssl_checked = set()
                 # Collect ports to check: anything with "HTTPS" in description
                 ssl_ports_to_check = []
                 for p, desc in sorted(inst.ports.items()):
                     if "HTTPS" in desc:
                         ssl_ports_to_check.append(p)
-                # Also check ICM service ports detected as SSL during fingerprinting
-                icm_svc = inst.services.get("icm")
-                if icm_svc and icm_svc.get("ssl") and icm_svc["port"] not in ssl_ports_to_check:
-                    ssl_ports_to_check.append(icm_svc["port"])
-                # Also check SAPControl HTTPS ports
-                for svc_name in ("sapcontrol",):
-                    svc = inst.services.get(svc_name)
-                    if svc and svc.get("ssl") and svc.get("port") not in ssl_ports_to_check:
-                        ssl_ports_to_check.append(svc["port"])
+                # Also check every service detected as SSL during fingerprinting
+                for svc in inst.services.values():
+                    if isinstance(svc, dict) and svc.get("ssl") and svc.get("port"):
+                        if svc["port"] not in ssl_ports_to_check:
+                            ssl_ports_to_check.append(svc["port"])
 
                 # Build a set of ports known to require SSL (from "Illegal SSL request" detection)
                 ssl_required_ports = set()
