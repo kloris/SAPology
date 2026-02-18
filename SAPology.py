@@ -209,6 +209,7 @@ SAP_FIXED_PORTS = {
     1091:  "SAP Content Server HTTPS",
     6400:  "SAP BusinessObjects CMS",
     59950: "SAP MDM Server",
+    59750: "SAP MDM Import Server",
     44300: "SAP Web Dispatcher HTTPS",
 }
 
@@ -1018,128 +1019,155 @@ def fingerprint_dispatcher(host, port, timeout=3):
     return info
 
 
-def fingerprint_mdm(host, port, timeout=3):
-    """Fingerprint SAP MDM Server, extract version and SID via MDM protocol.
+# ---------------------------------------------------------------------------
+# MDM protocol constants — interface CRCs across MDM versions
+# (from binary analysis of CLIX.exe, MDS.exe, MDIS.exe)
+# ---------------------------------------------------------------------------
 
-    Performs the full MDM handshake (init → interface negotiation → register →
-    session setup) then queries version (cmd 0x01) and SID (cmd 0x03).
+MDM_MAGIC = b'\x69\x12\x94\xa2'
+MDM_IDENT = b'\x69\x32\x41'
 
-    Protocol: 8-byte header (magic + band + ident) + 4-byte LE length + payload.
-    Command:  2-byte type LE + 2-byte cmd_id LE + 4-byte iface_crc LE + args.
+# All unique CRCs found across MDM binaries
+MDM_KNOWN_CRCS = [
+    (0x054f58ee, 'MDM 7.1.21 primary'),
+    (0x646e35f0, 'MDM 7.1.21 secondary'),
+    (0xd92079cf, 'MDM 7.1.21 v2'),
+    (0x82072e43, 'MDM 7.1.16 primary'),
+    (0x5bed2b5c, 'MDM 7.1.16 secondary'),
+    (0x8ce88d20, 'MDM 7.1.16 v5'),
+    (0x83381ec1, 'MDM shared v3'),
+    (0x24ec5073, 'MDM shared v4'),
+    (0x1d725db0, 'MDM shared v1'),
+    (0xa71ed79d, 'MDIS 7.1.16+'),
+]
+
+# Known primary/secondary CRC pairs for MDS negotiation
+MDM_CRC_PAIRS = [
+    (0x054f58ee, 0x646e35f0, 'MDM 7.1.21'),
+    (0x82072e43, 0x5bed2b5c, 'MDM 7.1.16'),
+    (0xd92079cf, 0x646e35f0, 'MDM 7.1.21 alt'),
+    (0x83381ec1, 0x24ec5073, 'MDM shared'),
+    (0x8ce88d20, 0x1d725db0, 'MDM 7.1.16 alt'),
+    (0x1d725db0, 0x83381ec1, 'MDM legacy'),
+    (0x24ec5073, 0x83381ec1, 'MDM legacy alt'),
+]
+
+
+def _mdm_build_pkt(band, payload):
+    """Build an MDM wire-protocol packet."""
+    return MDM_MAGIC + bytes([band]) + MDM_IDENT + struct.pack('<I', len(payload)) + payload
+
+
+def _mdm_build_cmd(cmd_type, cmd_id, crc, extra=b''):
+    """Build an MDM command payload."""
+    return struct.pack('<HHI', cmd_type, cmd_id, crc) + extra
+
+
+def _mdm_parse_resp(data):
+    """Parse an MDM response packet, return payload or None."""
+    if not data or len(data) < 12 or data[:4] != MDM_MAGIC:
+        return None
+    msg_len = struct.unpack('<I', data[8:12])[0]
+    return data[12:12 + msg_len] if len(data) >= 12 + msg_len else data[12:]
+
+
+def _mdm_parse_string(data, offset):
+    """Parse MDM string: [4B len][4B alloc][6B sid_prefix][len B string]."""
+    if offset + 8 > len(data):
+        return None
+    str_len = struct.unpack_from('<I', data, offset)[0]
+    str_start = offset + 8 + 6
+    str_end = str_start + str_len
+    if str_end > len(data):
+        return None
+    sid_prefix = data[offset + 8:str_start]
+    string_val = data[str_start:str_end]
+    return sid_prefix, string_val
+
+
+def _mdm_try_crc_pair(host, port, primary_crc, secondary_crc, timeout):
+    """Try a specific CRC pair for MDS negotiation and version extraction.
+
+    Returns dict with version/sid/platform or None on failure.
     """
-    MDM_MAGIC = b'\x69\x12\x94\xa2'
-    MDM_IDENT = b'\x69\x32\x41'
-    CRC_PRIMARY = 0x82072e43
-    CRC_SECONDARY = 0x5bed2b5c
-    info = {"type": "mdm", "accessible": False}
-
-    def build_pkt(band, payload):
-        return MDM_MAGIC + bytes([band]) + MDM_IDENT + struct.pack('<I', len(payload)) + payload
-
-    def build_cmd(cmd_id, crc=CRC_PRIMARY, extra=b'\x00'):
-        return struct.pack('<HHI', 1, cmd_id, crc) + extra
-
-    def send_recv(sock, pkt):
-        sock.sendall(pkt)
-        return sock.recv(8192)
-
-    def parse_resp(data):
-        if not data or len(data) < 12 or data[:4] != MDM_MAGIC:
-            return None
-        msg_len = struct.unpack('<I', data[8:12])[0]
-        return data[12:12 + msg_len] if len(data) >= 12 + msg_len else data[12:]
-
-    def parse_mdm_string(data, offset):
-        """Parse MDM string: [4B len][4B alloc][6B sid_prefix][len B string]."""
-        if offset + 8 > len(data):
-            return None
-        str_len = struct.unpack_from('<I', data, offset)[0]
-        str_start = offset + 8 + 6
-        str_end = str_start + str_len
-        if str_end > len(data):
-            return None
-        sid_prefix = data[offset + 8:str_start]
-        string_val = data[str_start:str_end]
-        return sid_prefix, string_val
-
+    info = {}
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         sock.connect((host, port))
-        info["accessible"] = True
 
-        # Phase 1: Init handshake (band=0x03, payload=0x01)
-        resp = send_recv(sock, build_pkt(0x03, b'\x01'))
-        payload = parse_resp(resp)
-        if payload is None:
+        # Init handshake
+        sock.sendall(_mdm_build_pkt(0x03, b'\x01'))
+        init_resp = sock.recv(8192)
+        if not _mdm_parse_resp(init_resp):
             sock.close()
-            return info
+            return None
 
-        # Phase 2: Interface CRC negotiation (3 rounds)
-        negotiation_ok = True
-        negotiations = [
-            (1, CRC_PRIMARY),
-            (1, CRC_PRIMARY),
-            (2, CRC_SECONDARY),
-        ]
-        for param_id, second_crc in negotiations:
-            extra = b'\x00' + struct.pack('<H', param_id) + struct.pack('<I', second_crc)
-            cmd = build_cmd(cmd_id=0, crc=CRC_PRIMARY, extra=extra)
-            payload = parse_resp(send_recv(sock, build_pkt(0x00, cmd)))
+        # CRC negotiation: 3 rounds
+        for param_id, check_crc in ((1, primary_crc), (1, primary_crc),
+                                     (2, secondary_crc)):
+            extra = b'\x00' + struct.pack('<H', param_id) + struct.pack('<I', check_crc)
+            cmd = _mdm_build_cmd(1, 0x00, primary_crc, extra)
+            sock.sendall(_mdm_build_pkt(0x00, cmd))
+            payload = _mdm_parse_resp(sock.recv(8192))
             if payload != b'\x00':
-                negotiation_ok = False
-                break
+                sock.close()
+                return None  # CRC rejected
 
-        if not negotiation_ok:
-            # Older MDM version — CRC negotiation not supported.
-            # Init succeeded (MDM magic confirmed), so mark accessible.
-            sock.close()
-            return info
-
-        # Phase 3: Client registration (cmd 0x0e)
+        # Client registration (cmd 0x0e)
         lang = b'engUS0'
         def mdm_str(s, prefix=b'000000'):
             sb = s.encode('latin-1')
             return struct.pack('<II', len(sb), len(sb)) + prefix + sb
         reg_extra = b'\x00' + lang + mdm_str('SAPologyScan') + mdm_str('')
-        reg_cmd = build_cmd(cmd_id=0x0e, crc=CRC_PRIMARY, extra=reg_extra)
-        reg_payload = parse_resp(send_recv(sock, build_pkt(0x00, reg_cmd)))
+        reg_cmd = _mdm_build_cmd(1, 0x0e, primary_crc, reg_extra)
+        sock.sendall(_mdm_build_pkt(0x00, reg_cmd))
+        reg_payload = _mdm_parse_resp(sock.recv(8192))
         session_token = None
         if reg_payload and len(reg_payload) >= 9:
             session_token = reg_payload[2:9]
 
-        # Phase 4: Session setup (cmd 0x14)
+        # Session setup (cmd 0x14) — may fail, non-fatal
         if session_token:
             setup_extra = (b'\x00\x01' + session_token +
                            b'\x00' * 8 + b'000000' +
                            b'\x00' * 8 + b'000000')
-            setup_cmd = build_cmd(cmd_id=0x14, crc=CRC_PRIMARY, extra=setup_extra)
-            send_recv(sock, build_pkt(0x00, setup_cmd))
+            setup_cmd = _mdm_build_cmd(1, 0x14, primary_crc, setup_extra)
+            sock.sendall(_mdm_build_pkt(0x00, setup_cmd))
+            try:
+                sock.recv(8192)
+            except socket.timeout:
+                pass
 
-        # Phase 5a: Version query (cmd 0x01)
-        ver_cmd = build_cmd(cmd_id=0x01, crc=CRC_PRIMARY, extra=b'\x00')
-        ver_payload = parse_resp(send_recv(sock, build_pkt(0x00, ver_cmd)))
+        # Version query (cmd 0x01)
+        ver_cmd = _mdm_build_cmd(1, 0x01, primary_crc, b'\x00')
+        sock.sendall(_mdm_build_pkt(0x00, ver_cmd))
+        ver_payload = _mdm_parse_resp(sock.recv(8192))
         if ver_payload and len(ver_payload) >= 15:
-            result = parse_mdm_string(ver_payload, 1)
+            result = _mdm_parse_string(ver_payload, 1)
             if result:
                 sid_prefix, version_bytes = result
                 try:
                     info["version"] = version_bytes.decode('latin-1')
-                    # SID may be in the 6-byte prefix field
                     sid_candidate = sid_prefix.decode('latin-1').rstrip('0').rstrip('\x00')
                     if sid_candidate and sid_candidate.isalnum() and len(sid_candidate) <= 6:
                         info["sid"] = sid_candidate
+                    # Extract platform from version string
+                    plat_m = re.search(r'(Win\d+|Linux\w*|AIX\w*|SunOS\w*|HP-UX\w*)',
+                                       info["version"])
+                    if plat_m:
+                        info["platform"] = plat_m.group(1)
                 except Exception:
                     pass
 
-        # Phase 5b: SID extraction (cmd 0x03)
+        # SID extraction (cmd 0x03) — fallback
         if "sid" not in info:
-            sid_cmd = build_cmd(cmd_id=0x03, crc=CRC_PRIMARY, extra=b'\x00')
-            sid_payload = parse_resp(send_recv(sock, build_pkt(0x00, sid_cmd)))
+            sid_cmd = _mdm_build_cmd(1, 0x03, primary_crc, b'\x00')
+            sock.sendall(_mdm_build_pkt(0x00, sid_cmd))
+            sid_payload = _mdm_parse_resp(sock.recv(8192))
             if sid_payload:
-                # Try MDM string format
                 if len(sid_payload) >= 15:
-                    result = parse_mdm_string(sid_payload, 1)
+                    result = _mdm_parse_string(sid_payload, 1)
                     if result:
                         sid_prefix, string_val = result
                         try:
@@ -1150,7 +1178,6 @@ def fingerprint_mdm(host, port, timeout=3):
                                     break
                         except Exception:
                             pass
-                # Try plain string fallback
                 if "sid" not in info and len(sid_payload) >= 2:
                     try:
                         text = sid_payload[1:].decode('latin-1').strip('\x00').strip()
@@ -1162,6 +1189,112 @@ def fingerprint_mdm(host, port, timeout=3):
                                 info["sid"] = text
                     except Exception:
                         pass
+
+        sock.close()
+        return info if info.get("version") else None
+    except Exception:
+        return None
+
+
+def fingerprint_mdm(host, port, timeout=3):
+    """Fingerprint SAP MDM Server, extract version and SID via MDM protocol.
+
+    Performs the full MDM handshake (init -> interface negotiation -> register ->
+    session setup) then queries version (cmd 0x01) and SID (cmd 0x03).
+
+    Tries multiple known CRC pairs to support MDM 3.x through 7.x.
+
+    Protocol: 8-byte header (magic + band + ident) + 4-byte LE length + payload.
+    Command:  2-byte type LE + 2-byte cmd_id LE + 4-byte iface_crc LE + args.
+    """
+    info = {"type": "mdm", "accessible": False}
+
+    # First check if port responds to MDM init handshake
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        info["accessible"] = True
+        sock.sendall(_mdm_build_pkt(0x03, b'\x01'))
+        resp = sock.recv(8192)
+        sock.close()
+        payload = _mdm_parse_resp(resp)
+        if payload is None:
+            return info
+    except Exception:
+        return info
+
+    # Try each known CRC pair for version extraction
+    for primary_crc, secondary_crc, pair_name in MDM_CRC_PAIRS:
+        result = _mdm_try_crc_pair(host, port, primary_crc, secondary_crc, timeout)
+        if result and result.get("version"):
+            info["version"] = result["version"]
+            if result.get("sid"):
+                info["sid"] = result["sid"]
+            if result.get("platform"):
+                info["platform"] = result["platform"]
+            info["crc_used"] = pair_name
+            return info
+
+    # No CRC pair worked — init confirmed MDM magic, mark as accessible
+    return info
+
+
+def fingerprint_mdis(host, port, timeout=3):
+    """Fingerprint SAP MDM Import Server (MDIS) via CRC bypass.
+
+    MDIS accepts commands without CRC negotiation — send init handshake
+    then cmd 0x02 (type=5) directly with each known CRC to extract the
+    version string.
+
+    Returns dict with type, accessible, version, platform keys.
+    """
+    info = {"type": "mdis", "accessible": False}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        info["accessible"] = True
+
+        # Init handshake
+        sock.sendall(_mdm_build_pkt(0x03, b'\x01'))
+        init_resp = sock.recv(8192)
+        if not _mdm_parse_resp(init_resp):
+            sock.close()
+            return info
+
+        # Try each CRC — MDIS doesn't need negotiation
+        for crc, crc_name in MDM_KNOWN_CRCS:
+            try:
+                cmd = _mdm_build_cmd(5, 0x02, crc)
+                sock.sendall(_mdm_build_pkt(0x00, cmd))
+                resp = sock.recv(8192)
+                payload = _mdm_parse_resp(resp)
+                if payload:
+                    text = ''.join(chr(b) if 32 <= b < 127 else '' for b in payload)
+                    ver_match = re.search(r'(Version\s+[\d.]+\s*\([^)]+\))', text)
+                    if ver_match:
+                        info["version"] = ver_match.group(1)
+                        num_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', text)
+                        plat_match = re.search(
+                            r'(Win\d+|Linux\w*|AIX\w*|SunOS\w*|HP-UX\w*)', text)
+                        if num_match:
+                            info["version_number"] = num_match.group(1)
+                        if plat_match:
+                            info["platform"] = plat_match.group(1)
+                        sock.close()
+                        return info
+            except (socket.timeout, ConnectionResetError, BrokenPipeError):
+                # CRC mismatch may cause disconnect; reconnect and try next
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                sock.connect((host, port))
+                sock.sendall(_mdm_build_pkt(0x03, b'\x01'))
+                sock.recv(8192)
 
         sock.close()
     except Exception:
@@ -4838,6 +4971,21 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                 sys_obj.sid = mdm_sid
                                 sid_found = True
 
+                # SAP MDM Import Server (MDIS)
+                elif "MDM Import" in svc_desc:
+                    log_verbose("  Checking MDM Import Server on port %d ..." % port)
+                    mdis_info = fingerprint_mdis(target_ip, port, timeout)
+                    if mdis_info.get("accessible"):
+                        instance.services["mdis"] = {"port": port}
+                        if mdis_info.get("version"):
+                            instance.info["mdis_version"] = mdis_info["version"]
+                            if mdis_info.get("platform"):
+                                instance.info["mdis_platform"] = mdis_info["platform"]
+                            # Use MDIS version as MDM version fallback if MDS
+                            # didn't provide one
+                            if "mdm_version" not in instance.info:
+                                instance.info["mdm_version"] = mdis_info["version"]
+
                 # SAP BusinessObjects CMS
                 elif "BusinessObjects" in svc_desc:
                     log_verbose("  Checking BusinessObjects CMS on port %d ..." % port)
@@ -4922,7 +5070,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
         is_router = False
         is_cloud_connector = False
         for inst in sys_obj.instances:
-            if inst.services.get("mdm") and inst.info.get("mdm_version"):
+            if (inst.services.get("mdm") or inst.services.get("mdis")) and inst.info.get("mdm_version"):
                 is_mdm = True
             if inst.services.get("bo_cms") or inst.services.get("bo_web"):
                 is_bo = True
@@ -5052,7 +5200,7 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                 total_checks += 1
             if inst.services.get("dispatcher"):
                 total_checks += 1
-            if inst.services.get("mdm"):
+            if inst.services.get("mdm") or inst.services.get("mdis"):
                 total_checks += 2  # CVE-2021-21475 + CVE-2021-21482
             if inst.services.get("bo_web") or inst.services.get("bo_cms"):
                 total_checks += len(http_ports)      # BO CMC exposed
@@ -5419,8 +5567,8 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                 if cancelled():
                     break
 
-                # MDM vulnerability checks
-                mdm_svc = inst.services.get("mdm")
+                # MDM vulnerability checks (MDS or MDIS)
+                mdm_svc = inst.services.get("mdm") or inst.services.get("mdis")
                 if mdm_svc and not cancelled():
                     mdm_ver = inst.info.get("mdm_version", "")
                     log_verbose("  Checking CVE-2021-21475 (MDM) on %s ..." % inst.ip)
