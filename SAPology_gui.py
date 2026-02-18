@@ -117,6 +117,7 @@ class SAPologyApi:
     def __init__(self):
         self.scan_thread = None
         self.landscape = []
+        self.btp_results = None
         self.scan_running = False
         self.scan_cancelled = False
         self.scan_start_time = 0
@@ -138,6 +139,7 @@ class SAPologyApi:
         self.scan_state = "running"
         self.scan_error = ""
         self.landscape = []
+        self.btp_results = None
         self.scan_duration = 0
 
         # Clear console
@@ -157,15 +159,24 @@ class SAPologyApi:
         return {"status": "cancel_requested"}
 
     def get_results(self):
-        if not self.landscape:
-            return {"systems": [], "summary": self._empty_summary()}
+        if not self.landscape and not self.btp_results:
+            return {"systems": [], "btp_endpoints": [],
+                    "btp_summary": None, "summary": self._empty_summary()}
 
         systems = []
         for s in self.landscape:
             systems.append(s.to_dict())
 
+        btp_endpoints = []
+        btp_summary = None
+        if self.btp_results:
+            btp_endpoints = [ep.to_dict() for ep in self.btp_results.endpoints]
+            btp_summary = self.btp_results.summary()
+
         return {
             "systems": systems,
+            "btp_endpoints": btp_endpoints,
+            "btp_summary": btp_summary,
             "summary": self._compute_summary(),
             "scan_duration": self.scan_duration,
             "scan_params": self.scan_params,
@@ -191,26 +202,44 @@ class SAPologyApi:
         }
 
     def export_html_report(self):
-        if not self.landscape:
+        if not self.landscape and not self.btp_results:
             return {"error": "No scan results to export"}
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join(os.getcwd(), "SAPology_%s.html" % ts)
+        has_onprem = bool(self.landscape)
+        has_btp = bool(self.btp_results and self.btp_results.endpoints)
+        if has_onprem and has_btp:
+            prefix = "SAPology_Full"
+        elif has_btp:
+            prefix = "SAPology_BTP"
+        else:
+            prefix = "SAPology"
+        output_path = os.path.join(os.getcwd(), "%s_%s.html" % (prefix, ts))
 
         SAPology.generate_html_report(
             self.landscape, output_path,
-            self.scan_duration, self.scan_params)
+            self.scan_duration, self.scan_params,
+            btp_results=self.btp_results)
 
         return {"path": output_path}
 
     def export_json(self):
-        if not self.landscape:
+        if not self.landscape and not self.btp_results:
             return {"error": "No scan results to export"}
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join(os.getcwd(), "SAPology_%s.json" % ts)
+        has_onprem = bool(self.landscape)
+        has_btp = bool(self.btp_results and self.btp_results.endpoints)
+        if has_onprem and has_btp:
+            prefix = "SAPology_Full"
+        elif has_btp:
+            prefix = "SAPology_BTP"
+        else:
+            prefix = "SAPology"
+        output_path = os.path.join(os.getcwd(), "%s_%s.json" % (prefix, ts))
 
-        SAPology.generate_json_export(self.landscape, output_path)
+        SAPology.generate_json_export(self.landscape, output_path,
+                                      btp_results=self.btp_results)
 
         return {"path": output_path}
 
@@ -231,7 +260,16 @@ class SAPologyApi:
                 config.get("targets", ""),
                 config.get("target_file", "") or None)
 
-            if not targets:
+            # Detect BTP mode
+            btp_target = config.get("btp_target", "")
+            btp_keyword = config.get("btp_keyword", "")
+            btp_domain = config.get("btp_domain", "")
+            btp_subaccount = config.get("btp_subaccount", "")
+            btp_targets_file = config.get("btp_targets_file", "")
+            has_btp = bool(btp_target or btp_keyword or btp_domain
+                          or btp_subaccount or btp_targets_file)
+
+            if not targets and not has_btp:
                 self.scan_state = "error"
                 self.scan_error = "No valid targets specified"
                 self.scan_running = False
@@ -254,42 +292,85 @@ class SAPologyApi:
                 "verbose": config.get("verbose", False),
             }
 
-            # Phase 1: Discovery
-            print("\n" + "=" * 60)
-            print(" Phase 1: System Discovery & Fingerprinting")
-            print("=" * 60 + "\n")
+            # On-prem phases (only if targets provided)
+            if targets:
+                # Phase 1: Discovery
+                print("\n" + "=" * 60)
+                print(" Phase 1: System Discovery & Fingerprinting")
+                print("=" * 60 + "\n")
 
-            self.landscape = SAPology.discover_systems(
-                targets, instances, timeout_val, threads_val,
-                config.get("verbose", False),
-                cancel_check=lambda: self.scan_cancelled)
+                self.landscape = SAPology.discover_systems(
+                    targets, instances, timeout_val, threads_val,
+                    config.get("verbose", False),
+                    cancel_check=lambda: self.scan_cancelled)
 
-            if self.scan_cancelled:
-                print("\n[!] Scan cancelled by user")
-                self.scan_state = "cancelled"
-                self.scan_running = False
-                return
-
-            # Phase 2: Vulnerability Assessment
-            if config.get("vuln_assess", True) and self.landscape:
                 if self.scan_cancelled:
                     print("\n[!] Scan cancelled by user")
                     self.scan_state = "cancelled"
                     self.scan_running = False
                     return
 
-                print("\n" + "=" * 60)
-                print(" Phase 2: Vulnerability Assessment")
-                print("=" * 60 + "\n")
+                # Phase 2: Vulnerability Assessment
+                if config.get("vuln_assess", True) and self.landscape:
+                    if self.scan_cancelled:
+                        print("\n[!] Scan cancelled by user")
+                        self.scan_state = "cancelled"
+                        self.scan_running = False
+                        return
 
-                self.landscape = SAPology.assess_vulnerabilities(
-                    self.landscape,
-                    gw_cmd=config.get("gw_cmd", "id"),
-                    timeout=timeout_val + 2,
-                    verbose=config.get("verbose", False),
-                    url_scan=config.get("url_scan", True),
-                    url_scan_threads=int(config.get("url_scan_threads", 25)),
-                    cancel_check=lambda: self.scan_cancelled)
+                    print("\n" + "=" * 60)
+                    print(" Phase 2: Vulnerability Assessment")
+                    print("=" * 60 + "\n")
+
+                    self.landscape = SAPology.assess_vulnerabilities(
+                        self.landscape,
+                        gw_cmd=config.get("gw_cmd", "id"),
+                        timeout=timeout_val + 2,
+                        verbose=config.get("verbose", False),
+                        url_scan=config.get("url_scan", True),
+                        url_scan_threads=int(config.get("url_scan_threads", 25)),
+                        cancel_check=lambda: self.scan_cancelled)
+
+                if self.scan_cancelled:
+                    print("\n[!] Scan cancelled by user")
+                    self.scan_state = "cancelled"
+                    self.scan_running = False
+                    return
+
+            # BTP Cloud Scanning Phase
+            if has_btp and not self.scan_cancelled:
+                print("\n" + "=" * 60)
+                print(" BTP Cloud Scanning")
+                print("=" * 60)
+                try:
+                    import SAPology_btp
+                    from SAPology_btp import BTPScanner
+                    SAPology_btp.HAS_RICH = False
+                    btp_config = {
+                        "target": btp_target,
+                        "keyword": btp_keyword,
+                        "domain": btp_domain,
+                        "subaccount": btp_subaccount,
+                        "targets_file": btp_targets_file or None,
+                        "regions": config.get("btp_regions", "all"),
+                        "skip_ct": config.get("btp_skip_ct", False),
+                        "skip_vuln": config.get("btp_skip_vuln", False),
+                        "shodan_key": config.get("btp_shodan_key", ""),
+                        "censys_id": config.get("btp_censys_id", ""),
+                        "censys_secret": config.get("btp_censys_secret", ""),
+                        "verbose": config.get("verbose", False),
+                        "threads": threads_val,
+                        "timeout": timeout_val,
+                        "cancel_check": lambda: self.scan_cancelled,
+                    }
+                    btp_scanner = BTPScanner(btp_config)
+                    self.btp_results = btp_scanner.run()
+                except ImportError:
+                    print("[-] SAPology_btp.py not found - BTP scanning unavailable")
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    print("[-] BTP scanning error: %s" % e)
 
             if self.scan_cancelled:
                 print("\n[!] Scan cancelled by user")
@@ -330,21 +411,48 @@ class SAPologyApi:
         for s in self.landscape:
             all_findings.extend(s.all_findings())
 
+        critical = sum(1 for f in all_findings if f.severity == SAPology.Severity.CRITICAL)
+        high = sum(1 for f in all_findings if f.severity == SAPology.Severity.HIGH)
+        medium = sum(1 for f in all_findings if f.severity == SAPology.Severity.MEDIUM)
+        low = sum(1 for f in all_findings if f.severity == SAPology.Severity.LOW)
+        info = sum(1 for f in all_findings if f.severity == SAPology.Severity.INFO)
+
+        btp_endpoints_count = 0
+        btp_finding_count = 0
+        if self.btp_results:
+            btp_endpoints_count = sum(1 for ep in self.btp_results.endpoints if ep.alive)
+            for ep in self.btp_results.endpoints:
+                for f in ep.findings:
+                    btp_finding_count += 1
+                    sev = int(f.severity)
+                    if sev == 0:
+                        critical += 1
+                    elif sev == 1:
+                        high += 1
+                    elif sev == 2:
+                        medium += 1
+                    elif sev == 3:
+                        low += 1
+                    else:
+                        info += 1
+
         return {
             "total_systems": total_systems,
             "total_ports": total_ports,
-            "total_findings": len(all_findings),
-            "critical": sum(1 for f in all_findings if f.severity == SAPology.Severity.CRITICAL),
-            "high": sum(1 for f in all_findings if f.severity == SAPology.Severity.HIGH),
-            "medium": sum(1 for f in all_findings if f.severity == SAPology.Severity.MEDIUM),
-            "low": sum(1 for f in all_findings if f.severity == SAPology.Severity.LOW),
-            "info": sum(1 for f in all_findings if f.severity == SAPology.Severity.INFO),
+            "total_findings": len(all_findings) + btp_finding_count,
+            "critical": critical,
+            "high": high,
+            "medium": medium,
+            "low": low,
+            "info": info,
+            "btp_endpoints": btp_endpoints_count,
         }
 
     def _empty_summary(self):
         return {
             "total_systems": 0, "total_ports": 0, "total_findings": 0,
             "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
+            "btp_endpoints": 0,
         }
 
 
@@ -685,6 +793,7 @@ GUI_HTML = r"""<!DOCTYPE html>
   .sys-icon.java { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); }
   .sys-icon.mdm { background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%); }
   .sys-icon.unknown { background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); }
+  .sys-icon.btp { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }
 
   .sys-info { flex: 1; min-width: 0; }
   .sys-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -953,6 +1062,7 @@ GUI_HTML = r"""<!DOCTYPE html>
   </div>
   <div class="nav-tab active" onclick="switchTab('dashboard')">Dashboard</div>
   <div class="nav-tab" id="tab-urlscan" onclick="switchTab('urlscan')">URL Scan</div>
+  <div class="nav-tab" id="tab-btp" onclick="switchTab('btp')" style="display:none;">BTP Cloud</div>
   <div class="nav-spacer"></div>
   <div class="nav-status" id="nav-status">
     <span class="dot" style="background:var(--success);"></span> Ready
@@ -960,7 +1070,7 @@ GUI_HTML = r"""<!DOCTYPE html>
   <div class="nav-tagline">
     <span class="tl-top">SAP Network Topology <span class="tl-sorry">&middot;&middot;&middot; Sorry for scanning you ;-)</span></span>
     <span class="tl-mid">&#9961; The scanner that speaks SAPanese</span>
-    <span class="tl-bot">DIAG &middot; RFC &middot; Gateway &middot; MS &middot; ICM &middot; J2EE</span>
+    <span class="tl-bot">DIAG &middot; RFC &middot; Gateway &middot; MS &middot; ICM &middot; J2EE &middot; BTP Cloud</span>
     <span class="tl-author">by Joris van de Vis</span>
   </div>
 </div>
@@ -1015,6 +1125,53 @@ GUI_HTML = r"""<!DOCTYPE html>
     </div>
 
     <div>
+      <div class="section-title" style="cursor:pointer;" onclick="toggleBtpSection()">BTP CLOUD <span id="btp-section-arrow" style="float:right;font-size:9px;opacity:0.5;">&#9660;</span></div>
+      <div id="btp-section-body" style="display:none;">
+        <div class="field-group">
+          <div class="field-label">BTP Target(s)</div>
+          <input type="text" class="field-input" id="input-btp-target" placeholder="hostname or URL, comma-separated">
+        </div>
+        <div class="field-group">
+          <div class="field-label">CT Log Keyword</div>
+          <input type="text" class="field-input" id="input-btp-keyword" placeholder="org keyword for CT log search">
+        </div>
+        <div class="field-group">
+          <div class="field-label">Custom Domain</div>
+          <input type="text" class="field-input" id="input-btp-domain" placeholder="e.g. mycompany.com">
+        </div>
+        <div class="field-group">
+          <div class="field-label">Subaccount ID</div>
+          <input type="text" class="field-input" id="input-btp-subaccount" placeholder="Known subaccount identifier">
+        </div>
+        <div class="field-group">
+          <div class="field-label">BTP Targets File</div>
+          <input type="text" class="field-input" id="input-btp-targets-file" placeholder="Path to BTP targets file">
+        </div>
+        <div class="field-group">
+          <div class="field-label">Regions</div>
+          <input type="text" class="field-input" id="input-btp-regions" value="all" placeholder="all, or eu10,us10,...">
+        </div>
+        <div class="toggle-row">Skip CT Log Search <div class="toggle-switch" id="toggle-btp-skip-ct" onclick="this.classList.toggle('on')"></div></div>
+        <div class="toggle-row">Skip BTP Vuln Check <div class="toggle-switch" id="toggle-btp-skip-vuln" onclick="this.classList.toggle('on')"></div></div>
+        <div class="section-title" style="cursor:pointer;margin-top:8px;font-size:10px;opacity:0.6;" onclick="toggleBtpAdvanced()">ADVANCED (Shodan/Censys) <span id="btp-adv-arrow" style="float:right;font-size:9px;">&#9654;</span></div>
+        <div id="btp-advanced-body" style="display:none;">
+          <div class="field-group">
+            <div class="field-label">Shodan API Key</div>
+            <input type="text" class="field-input" id="input-btp-shodan" placeholder="Shodan API key">
+          </div>
+          <div class="field-group">
+            <div class="field-label">Censys API ID</div>
+            <input type="text" class="field-input" id="input-btp-censys-id" placeholder="Censys API ID">
+          </div>
+          <div class="field-group">
+            <div class="field-label">Censys API Secret</div>
+            <input type="text" class="field-input" id="input-btp-censys-secret" placeholder="Censys API secret">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
       <button class="btn-scan" id="btn-start-scan" onclick="startScan()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         Start Scan
@@ -1034,6 +1191,7 @@ GUI_HTML = r"""<!DOCTYPE html>
       <div class="summary-cards">
         <div class="summary-card sc-blue"><div class="sc-bar"></div><div class="sc-value" id="summary-systems">--</div><div class="sc-label">SAP Systems</div></div>
         <div class="summary-card sc-green"><div class="sc-bar"></div><div class="sc-value" id="summary-ports">--</div><div class="sc-label">Open Ports</div></div>
+        <div class="summary-card" id="summary-btp-card" style="display:none;"><div class="sc-bar" style="background:#06b6d4;"></div><div class="sc-value" id="summary-btp-endpoints">--</div><div class="sc-label">BTP Endpoints</div></div>
         <div class="summary-card sc-red"><div class="sc-bar"></div><div class="sc-value" id="summary-critical">--</div><div class="sc-label">Critical</div></div>
         <div class="summary-card sc-orange"><div class="sc-bar"></div><div class="sc-value" id="summary-high">--</div><div class="sc-label">High</div></div>
         <div class="summary-card sc-yellow"><div class="sc-bar"></div><div class="sc-value" id="summary-medium">--</div><div class="sc-label">Medium</div></div>
@@ -1093,6 +1251,29 @@ GUI_HTML = r"""<!DOCTYPE html>
             <thead><tr><th>System</th><th>Port</th><th>Proto</th><th>Path</th><th>Status</th><th>Size</th><th>Server</th><th>Notes</th></tr></thead>
             <tbody id="url-view-tbody"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- BTP Cloud View -->
+    <div id="view-btp" class="view-container">
+      <div class="url-summary-bar" id="btp-summary-bar">
+        <div class="url-stat"><strong id="btp-total-endpoints">0</strong> BTP Endpoints</div>
+        <div class="url-stat"><strong id="btp-alive-endpoints">0</strong> Alive</div>
+        <div class="url-stat"><strong id="btp-total-findings-count">0</strong> Findings</div>
+      </div>
+      <div class="grid-row" style="flex:1;min-height:0;">
+        <div class="panel wide">
+          <div class="panel-header">BTP Endpoints <span class="badge" id="btp-endpoints-badge">0 endpoints</span></div>
+          <div class="panel-body" id="btp-endpoints-list" style="overflow-y:auto;max-height:400px;">
+            <div class="empty-state">No BTP endpoints discovered yet. Configure BTP Cloud options and start a scan.</div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">BTP Findings <span class="badge" id="btp-findings-badge">0 findings</span></div>
+          <div class="panel-body" id="btp-findings-list" style="overflow-y:auto;max-height:400px;">
+            <div class="empty-state">No BTP findings yet.</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1210,6 +1391,18 @@ function pollUpdates() {
                 document.getElementById('progress-fill').style.width = '5%';
                 document.getElementById('progress-label-left').textContent = 'Phase 1: Pre-scanning hosts';
             }
+            // BTP phase tracking
+            if (ln.text.match(/BTP Cloud Scanning/)) {
+                document.getElementById('progress-fill').style.width = '95%';
+                document.getElementById('progress-fill').style.animation = 'none';
+                document.getElementById('progress-label-left').textContent = 'BTP Cloud Scanning';
+            }
+            var btpPhaseMatch = ln.text.match(/BTP Phase (\d): (.+)/);
+            if (btpPhaseMatch) {
+                document.getElementById('progress-fill').style.width = (95 + parseInt(btpPhaseMatch[1])) + '%';
+                document.getElementById('progress-fill').style.animation = 'none';
+                document.getElementById('progress-label-left').textContent = 'BTP: ' + btpPhaseMatch[2];
+            }
         });
         consoleCursor = data.cursor;
     }).catch(function(){});
@@ -1246,8 +1439,15 @@ function startScan() {
     var targets = document.getElementById('input-targets').value;
     var targetFile = document.getElementById('input-target-file').value;
 
-    if (!targets && !targetFile) {
-        alert('Please specify at least one target or a target file.');
+    var btpTarget = document.getElementById('input-btp-target').value;
+    var btpKeyword = document.getElementById('input-btp-keyword').value;
+    var btpDomain = document.getElementById('input-btp-domain').value;
+    var btpSubaccount = document.getElementById('input-btp-subaccount').value;
+    var btpTargetsFile = document.getElementById('input-btp-targets-file').value;
+    var hasBtp = btpTarget || btpKeyword || btpDomain || btpSubaccount || btpTargetsFile;
+
+    if (!targets && !targetFile && !hasBtp) {
+        alert('Please specify at least one target, a target file, or BTP Cloud options.');
         return;
     }
 
@@ -1261,7 +1461,18 @@ function startScan() {
         gw_cmd: document.getElementById('input-gw-cmd').value || 'id',
         vuln_assess: document.getElementById('toggle-vuln').classList.contains('on'),
         url_scan: document.getElementById('toggle-url-scan').classList.contains('on'),
-        verbose: document.getElementById('toggle-verbose').classList.contains('on')
+        verbose: document.getElementById('toggle-verbose').classList.contains('on'),
+        btp_target: btpTarget,
+        btp_keyword: btpKeyword,
+        btp_domain: btpDomain,
+        btp_subaccount: btpSubaccount,
+        btp_targets_file: btpTargetsFile,
+        btp_regions: document.getElementById('input-btp-regions').value || 'all',
+        btp_skip_ct: document.getElementById('toggle-btp-skip-ct').classList.contains('on'),
+        btp_skip_vuln: document.getElementById('toggle-btp-skip-vuln').classList.contains('on'),
+        btp_shodan_key: document.getElementById('input-btp-shodan').value || '',
+        btp_censys_id: document.getElementById('input-btp-censys-id').value || '',
+        btp_censys_secret: document.getElementById('input-btp-censys-secret').value || ''
     };
 
     scanGeneration++;
@@ -1313,11 +1524,14 @@ function onScanComplete() {
         renderDashboard(results);
         var n = (results.summary || {}).total_systems || 0;
         var f = (results.summary || {}).total_findings || 0;
+        var btpCount = (results.btp_endpoints || []).filter(function(ep){return ep.alive;}).length;
         document.getElementById('nav-status').innerHTML =
             '<span class="dot" style="background:var(--success);box-shadow:0 0 6px var(--success);"></span> Scan complete';
         document.getElementById('nav-status').style.color = 'var(--success)';
-        document.getElementById('progress-label-left').textContent =
-            'Scan complete \u2014 ' + n + ' systems, ' + f + ' findings';
+        var label = 'Scan complete \u2014 ' + n + ' systems';
+        if (btpCount > 0) label += ', ' + btpCount + ' BTP endpoints';
+        label += ', ' + f + ' findings';
+        document.getElementById('progress-label-left').textContent = label;
     });
 }
 
@@ -1354,10 +1568,21 @@ function renderDashboard(data) {
     document.getElementById('summary-medium').textContent = s.medium || 0;
     document.getElementById('summary-low').textContent = s.low || 0;
     document.getElementById('summary-info').textContent = s.info || 0;
+
+    var btpCard = document.getElementById('summary-btp-card');
+    if ((data.btp_endpoints || []).length > 0) {
+        btpCard.style.display = '';
+        var aliveCount = (data.btp_endpoints || []).filter(function(ep){return ep.alive;}).length;
+        document.getElementById('summary-btp-endpoints').textContent = aliveCount;
+    } else {
+        btpCard.style.display = 'none';
+    }
+
     renderSystems(data.systems || []);
     renderSeverityChart(s);
-    renderFindings(data.systems || []);
+    renderFindings(data.systems || [], data.btp_endpoints || []);
     renderUrlScanView(data.systems || []);
+    renderBtpView(data.btp_endpoints || [], data.btp_summary || null);
 }
 
 function renderSystems(systems) {
@@ -1410,7 +1635,7 @@ function renderSystems(systems) {
     container.innerHTML = html;
 }
 
-function renderFindings(systems) {
+function renderFindings(systems, btpEndpoints) {
     var container = document.getElementById('findings-list');
     var badge = document.getElementById('findings-badge');
 
@@ -1418,8 +1643,13 @@ function renderFindings(systems) {
     systems.forEach(function(sys) {
         (sys.instances || []).forEach(function(inst) {
             (inst.findings || []).forEach(function(f) {
-                allF.push({f: f, sys: sys, inst: inst});
+                allF.push({f: f, label: sys.sid + ' \u00b7 :' + f.port});
             });
+        });
+    });
+    (btpEndpoints || []).forEach(function(ep) {
+        (ep.findings || []).forEach(function(f) {
+            allF.push({f: f, label: 'BTP: ' + (ep.hostname || ep.url)});
         });
     });
 
@@ -1441,7 +1671,7 @@ function renderFindings(systems) {
             '<div class="finding-row-top">' +
                 '<span class="finding-sev ' + sevClass + '">' + f.severity + '</span>' +
                 '<span class="finding-name">' + esc(f.name) + '</span>' +
-                '<span class="finding-target">' + esc(item.sys.sid) + ' \u00b7 :' + f.port + '</span>' +
+                '<span class="finding-target">' + esc(item.label) + '</span>' +
                 '<span class="finding-arrow">&#8250;</span>' +
             '</div>' +
         '</div>' +
@@ -1490,6 +1720,9 @@ function switchTab(name) {
     if (name === 'urlscan') {
         document.getElementById('tab-urlscan').classList.add('active');
         document.getElementById('view-urlscan').classList.add('active');
+    } else if (name === 'btp') {
+        document.getElementById('tab-btp').classList.add('active');
+        document.getElementById('view-btp').classList.add('active');
     } else {
         tabs[0].classList.add('active');
         document.getElementById('view-dashboard').classList.add('active');
@@ -1766,6 +1999,15 @@ function clearDashboard() {
     document.getElementById('url-empty-state').style.display = '';
     document.getElementById('url-total-count').textContent = '0';
     document.getElementById('tab-urlscan').innerHTML = 'URL Scan';
+    document.getElementById('btp-endpoints-list').innerHTML = '<div class="empty-state">Scanning...</div>';
+    document.getElementById('btp-findings-list').innerHTML = '<div class="empty-state">Scanning...</div>';
+    document.getElementById('btp-total-endpoints').textContent = '0';
+    document.getElementById('btp-alive-endpoints').textContent = '0';
+    document.getElementById('btp-total-findings-count').textContent = '0';
+    document.getElementById('tab-btp').style.display = 'none';
+    document.getElementById('tab-btp').innerHTML = 'BTP Cloud';
+    document.getElementById('summary-btp-card').style.display = 'none';
+    document.getElementById('summary-btp-endpoints').textContent = '--';
 }
 
 function updateTimer(t) { document.getElementById('progress-label-right').textContent = t; }
@@ -1775,7 +2017,184 @@ function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'
 function openUrl(url) { apiPost('/api/open_url', {url: url}); }
 function getTimestamp() { var d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2); }
 function toggleFinding(i) { document.getElementById('fr-'+i).classList.toggle('expanded'); }
+function toggleBtpFinding(i) { document.getElementById('bfr-'+i).classList.toggle('expanded'); }
 function toggleModal() { document.getElementById('modal').classList.toggle('open'); }
+
+// === BTP Section Toggles ===
+function toggleBtpSection() {
+    var body = document.getElementById('btp-section-body');
+    var arrow = document.getElementById('btp-section-arrow');
+    if (body.style.display === 'none') {
+        body.style.display = '';
+        arrow.innerHTML = '&#9650;';
+    } else {
+        body.style.display = 'none';
+        arrow.innerHTML = '&#9660;';
+    }
+}
+function toggleBtpAdvanced() {
+    var body = document.getElementById('btp-advanced-body');
+    var arrow = document.getElementById('btp-adv-arrow');
+    if (body.style.display === 'none') {
+        body.style.display = '';
+        arrow.innerHTML = '&#9660;';
+    } else {
+        body.style.display = 'none';
+        arrow.innerHTML = '&#9654;';
+    }
+}
+
+// === BTP Cloud View Rendering ===
+function renderBtpView(btpEndpoints, btpSummary) {
+    var tabEl = document.getElementById('tab-btp');
+    if (!btpEndpoints || btpEndpoints.length === 0) {
+        tabEl.style.display = 'none';
+        return;
+    }
+    tabEl.style.display = '';
+    var alive = btpEndpoints.filter(function(ep) { return ep.alive; });
+    var totalFindings = 0;
+    btpEndpoints.forEach(function(ep) { totalFindings += (ep.findings || []).length; });
+    tabEl.innerHTML = 'BTP Cloud <span class="tab-badge">(' + alive.length + ')</span>';
+
+    document.getElementById('btp-total-endpoints').textContent = btpEndpoints.length;
+    document.getElementById('btp-alive-endpoints').textContent = alive.length;
+    document.getElementById('btp-total-findings-count').textContent = totalFindings;
+
+    var epContainer = document.getElementById('btp-endpoints-list');
+    var epBadge = document.getElementById('btp-endpoints-badge');
+    epBadge.textContent = alive.length + ' endpoint' + (alive.length !== 1 ? 's' : '') + ' alive';
+
+    if (alive.length === 0) {
+        epContainer.innerHTML = '<div class="empty-state">No live BTP endpoints found.</div>';
+    } else {
+        var html = '';
+        alive.forEach(function(ep, idx) {
+            var svcType = ep.service_type || 'unknown';
+            var svcLabel = svcType.replace(/_/g, ' ').toUpperCase();
+            if (svcLabel.length > 6) svcLabel = svcLabel.substring(0, 6);
+            var badges = '';
+            var crit = 0, high = 0, med = 0;
+            (ep.findings || []).forEach(function(f) {
+                if (f.severity === 'CRITICAL') crit++;
+                else if (f.severity === 'HIGH') high++;
+                else if (f.severity === 'MEDIUM') med++;
+            });
+            if (crit > 0) badges += '<span class="mini-badge mb-critical">' + crit + '</span>';
+            if (high > 0) badges += '<span class="mini-badge mb-high">' + high + '</span>';
+            if (med > 0) badges += '<span class="mini-badge mb-medium">' + med + '</span>';
+            var meta = (ep.region || 'unknown') + ' \u00b7 ' + (ep.service_type || 'unknown');
+            if (ep.auth_type) meta += ' \u00b7 ' + ep.auth_type;
+            if (ep.status_code) meta += ' \u00b7 HTTP ' + ep.status_code;
+
+            html += '<div class="sys-row" onclick="showBtpEndpointModal(' + idx + ')">' +
+                '<div class="sys-icon btp">' + esc(svcLabel) + '</div>' +
+                '<div class="sys-info">' +
+                    '<div class="sys-name">' + esc(ep.hostname) + '</div>' +
+                    '<div class="sys-meta">' + esc(meta) + '</div>' +
+                '</div>' +
+                '<div class="sys-badges">' + badges + '</div>' +
+                '<span class="sys-chevron">&#8250;</span>' +
+            '</div>';
+        });
+        epContainer.innerHTML = html;
+    }
+
+    var fContainer = document.getElementById('btp-findings-list');
+    var fBadge = document.getElementById('btp-findings-badge');
+    fBadge.textContent = totalFindings + ' finding' + (totalFindings !== 1 ? 's' : '');
+    if (totalFindings === 0) {
+        fContainer.innerHTML = '<div class="empty-state">No BTP findings.</div>';
+        return;
+    }
+    var allBtpF = [];
+    btpEndpoints.forEach(function(ep) {
+        (ep.findings || []).forEach(function(f) { allBtpF.push({f: f, ep: ep}); });
+    });
+    var sevOrder = {CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3, INFO:4};
+    allBtpF.sort(function(a,b) {
+        var sa = sevOrder[a.f.severity], sb = sevOrder[b.f.severity];
+        return (sa !== undefined ? sa : 5) - (sb !== undefined ? sb : 5);
+    });
+    var fHtml = '';
+    allBtpF.forEach(function(item, idx) {
+        var f = item.f;
+        var sevClass = 'fs-' + f.severity.toLowerCase();
+        fHtml += '<div class="finding-row" id="bfr-' + idx + '" onclick="toggleBtpFinding(' + idx + ')">' +
+            '<div class="finding-row-top">' +
+                '<span class="finding-sev ' + sevClass + '">' + f.severity + '</span>' +
+                '<span class="finding-name">' + esc(f.name) + '</span>' +
+                '<span class="finding-target">' + esc(item.ep.hostname) + '</span>' +
+                '<span class="finding-arrow">&#8250;</span>' +
+            '</div>' +
+        '</div>' +
+        '<div class="finding-details" id="bfd-' + idx + '">' +
+            '<div class="fd-section"><div class="fd-label">Description</div>' +
+                '<div class="fd-text">' + esc(f.description) + '</div></div>' +
+            (f.detail ? '<div class="fd-section"><div class="fd-label">Detail</div><div class="fd-text">' + esc(f.detail) + '</div></div>' : '') +
+            (f.remediation ? '<div class="fd-section"><div class="fd-label">Remediation</div><div class="fd-text">' + esc(f.remediation) + '</div></div>' : '') +
+        '</div>';
+    });
+    fContainer.innerHTML = fHtml;
+}
+
+function showBtpEndpointModal(idx) {
+    if (!scanData || !scanData.btp_endpoints) return;
+    var alive = scanData.btp_endpoints.filter(function(ep) { return ep.alive; });
+    if (!alive[idx]) return;
+    var ep = alive[idx];
+
+    var info = '<div class="info-grid">' +
+        '<div class="info-item"><span class="ik">Hostname</span><span class="iv">' + esc(ep.hostname) + '</span></div>' +
+        '<div class="info-item"><span class="ik">IP Address</span><span class="iv">' + esc(ep.ip || 'N/A') + '</span></div>' +
+        '<div class="info-item"><span class="ik">URL</span><span class="iv">' + esc(ep.url) + '</span></div>' +
+        '<div class="info-item"><span class="ik">Port</span><span class="iv">' + ep.port + '</span></div>' +
+        '<div class="info-item"><span class="ik">Service Type</span><span class="iv">' + esc(ep.service_type || 'Unknown') + '</span></div>' +
+        '<div class="info-item"><span class="ik">Region</span><span class="iv">' + esc(ep.region || 'Unknown') + '</span></div>' +
+        '<div class="info-item"><span class="ik">Subaccount</span><span class="iv">' + esc(ep.subaccount || 'N/A') + '</span></div>' +
+        '<div class="info-item"><span class="ik">Auth Type</span><span class="iv">' + esc(ep.auth_type || 'N/A') + '</span></div>' +
+        '<div class="info-item"><span class="ik">HTTP Status</span><span class="iv">' + (ep.status_code || 'N/A') + '</span></div>' +
+        '<div class="info-item"><span class="ik">Server</span><span class="iv">' + esc(ep.server_header || 'N/A') + '</span></div>' +
+        '<div class="info-item"><span class="ik">Source</span><span class="iv">' + esc(ep.source || 'N/A') + '</span></div>' +
+        '</div>';
+
+    var techHtml = '';
+    if (ep.technologies && ep.technologies.length > 0) {
+        techHtml = '<div class="modal-section"><h4>Technologies</h4><div style="display:flex;gap:6px;flex-wrap:wrap;">';
+        ep.technologies.forEach(function(t) { techHtml += '<span class="badge">' + esc(t) + '</span>'; });
+        techHtml += '</div></div>';
+    }
+
+    var sshHtml = '';
+    if (ep.ssh_info && ep.ssh_info.open) {
+        sshHtml = '<div class="modal-section"><h4>CF SSH (Port 2222)</h4><div class="info-grid">';
+        if (ep.ssh_info.banner) sshHtml += '<div class="info-item"><span class="ik">Banner</span><span class="iv">' + esc(ep.ssh_info.banner) + '</span></div>';
+        if (ep.ssh_info.cloud_provider) sshHtml += '<div class="info-item"><span class="ik">Cloud Provider</span><span class="iv">' + esc(ep.ssh_info.cloud_provider) + '</span></div>';
+        if (ep.ssh_info.cloud_region) sshHtml += '<div class="info-item"><span class="ik">Cloud Region</span><span class="iv">' + esc(ep.ssh_info.cloud_region) + '</span></div>';
+        if (ep.ssh_info.rdns) sshHtml += '<div class="info-item"><span class="ik">rDNS</span><span class="iv">' + esc(ep.ssh_info.rdns) + '</span></div>';
+        sshHtml += '</div></div>';
+    }
+
+    var findings = '';
+    (ep.findings || []).forEach(function(f) {
+        findings += '<div class="modal-finding" onclick="this.classList.toggle(\'open\')">' +
+            '<div class="mf-top"><span class="mf-name">' + esc(f.name) + '</span>' +
+            '<span class="finding-sev fs-' + f.severity.toLowerCase() + '">' + f.severity + '</span></div>' +
+            '<div class="mf-body">' + esc(f.description) +
+            (f.detail ? '<br><br><strong>Detail:</strong> ' + esc(f.detail) : '') +
+            (f.remediation ? '<br><br><strong>Remediation:</strong> ' + esc(f.remediation) : '') +
+            '</div></div>';
+    });
+
+    document.getElementById('modal-title').innerHTML =
+        '<div class="sys-icon btp" style="width:32px;height:32px;font-size:9px;">BTP</div> ' + esc(ep.hostname);
+    document.getElementById('modal-body').innerHTML =
+        '<div class="modal-section"><h4>Endpoint Information</h4>' + info + '</div>' +
+        techHtml + sshHtml +
+        '<div class="modal-section"><h4>Findings (' + (ep.findings || []).length + ')</h4>' +
+        (findings || '<div class="empty-state">No findings for this endpoint.</div>') + '</div>';
+    document.getElementById('modal').classList.add('open');
+}
 function toggleConsole() {
     var panel = document.getElementById('consolePanel');
     var toggle = document.getElementById('consoleToggle');
