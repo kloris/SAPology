@@ -584,9 +584,10 @@ class WaybackDiscovery:
     def search(self, domain):
         """Search Wayback Machine for archived BTP-related URLs."""
         hostnames = set()
+        keyword = domain.split(".")[0]
         queries = [
             "*.%s" % domain,
-            "*.hana.ondemand.com/*%s*" % domain.split(".")[0],
+            "*%s*.hana.ondemand.com" % keyword,
         ]
         for q in queries:
             try:
