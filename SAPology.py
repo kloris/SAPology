@@ -3774,7 +3774,7 @@ def generate_svg_topology(landscape):
     return "\n".join(lines)
 
 
-def generate_html_report(landscape, output_path, scan_duration=0, scan_params=None):
+def generate_html_report(landscape, output_path, scan_duration=0, scan_params=None, btp_results=None):
     """Generate a self-contained HTML report."""
     total_findings = sum(len(s.all_findings()) for s in landscape)
     critical_count = sum(1 for s in landscape for f in s.all_findings() if f.severity == Severity.CRITICAL)
@@ -3784,25 +3784,55 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
     info_count = sum(1 for s in landscape for f in s.all_findings() if f.severity == Severity.INFO)
     total_instances = sum(len(s.instances) for s in landscape)
 
+    # Include BTP findings in executive summary counts
+    if btp_results:
+        for ep in btp_results.endpoints:
+            for f in ep.findings:
+                total_findings += 1
+                if f.severity == Severity.CRITICAL:
+                    critical_count += 1
+                elif f.severity == Severity.HIGH:
+                    high_count += 1
+                elif f.severity == Severity.MEDIUM:
+                    medium_count += 1
+                elif f.severity == Severity.LOW:
+                    low_count += 1
+                elif f.severity == Severity.INFO:
+                    info_count += 1
+        total_instances += sum(1 for ep in btp_results.endpoints if ep.alive)
+
     svg_topology = generate_svg_topology(landscape)
 
-    # Build findings table rows
+    # Build findings table rows (on-prem + BTP combined)
     findings_rows = ""
     all_findings = []
     for sys_obj in landscape:
         for inst in sys_obj.instances:
             for f in inst.findings:
-                all_findings.append((sys_obj, inst, f))
-    all_findings.sort(key=lambda x: x[2].severity)
+                system_label = "%s (%s:%s)" % (sys_obj.sid, inst.ip, f.port)
+                all_findings.append((f, system_label))
 
-    for sys_obj, inst, f in all_findings:
+    # Include BTP findings in the same table
+    if btp_results:
+        for ep in btp_results.endpoints:
+            for f in ep.findings:
+                system_label = "BTP: %s" % ep.hostname
+                if ep.region:
+                    system_label += " (%s)" % ep.region
+                if f.port:
+                    system_label += ":%s" % f.port
+                all_findings.append((f, system_label))
+
+    all_findings.sort(key=lambda x: x[0].severity)
+
+    for f, system_label in all_findings:
         sev_color = SEVERITY_COLORS[f.severity]
         sev_name = SEVERITY_NAMES[f.severity]
         findings_rows += """
         <tr>
           <td><span class="severity-badge" style="background:%s">%s</span></td>
           <td>%s</td>
-          <td>%s (%s:%s)</td>
+          <td>%s</td>
           <td>%s</td>
           <td class="detail-cell">%s</td>
           <td>%s</td>
@@ -3810,7 +3840,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         """ % (
             sev_color, sev_name,
             html.escape(f.name),
-            html.escape(sys_obj.sid), html.escape(inst.ip), f.port,
+            html.escape(system_label),
             html.escape(f.description),
             html.escape(f.detail),
             html.escape(f.remediation),
@@ -4194,11 +4224,21 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         scan_options_rows,
     )
 
+    # Inject BTP section if available
+    if btp_results:
+        try:
+            from SAPology_btp import generate_btp_html_section
+            btp_html = generate_btp_html_section(btp_results)
+            if btp_html:
+                html_content = html_content.replace("</body>", btp_html + "\n</body>")
+        except ImportError:
+            pass
+
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
 
 
-def generate_json_export(landscape, output_path):
+def generate_json_export(landscape, output_path, btp_results=None):
     """Export scan results as JSON."""
     data = {
         "scan_time": datetime.now().isoformat(),
@@ -4214,6 +4254,8 @@ def generate_json_export(landscape, output_path):
             "info": sum(1 for s in landscape for f in s.all_findings() if f.severity == Severity.INFO),
         }
     }
+    if btp_results:
+        data["btp"] = btp_results.to_dict()
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, default=str)
 
@@ -6529,10 +6571,39 @@ examples:
                              "(comma-separated, 1-254). Default: 1,2,5,10,21,29,50,80. "
                              "Example: --hm-offsets 1,5,10,50,100,200")
 
+    # BTP Cloud Scanning
+    btp_group = parser.add_argument_group("BTP Cloud Scanning")
+    btp_group.add_argument("--btp", action="store_true",
+                           help="Enable BTP cloud scanning mode")
+    btp_group.add_argument("--btp-target",
+                           help="Target BTP URL or hostname (comma-separated)")
+    btp_group.add_argument("--btp-discover",
+                           help="Search CT logs for org keyword")
+    btp_group.add_argument("--btp-domain",
+                           help="Target custom domain (e.g., mycompany.com)")
+    btp_group.add_argument("--btp-subaccount",
+                           help="Known subaccount identifier")
+    btp_group.add_argument("--btp-targets",
+                           help="File with known BTP URLs (one per line)")
+    btp_group.add_argument("--btp-regions", default="all",
+                           help="Comma-separated BTP regions (default: all)")
+    btp_group.add_argument("--btp-skip-ct", action="store_true",
+                           help="Skip Certificate Transparency log search")
+    btp_group.add_argument("--btp-skip-vuln", action="store_true",
+                           help="Skip BTP vulnerability assessment")
+    btp_group.add_argument("--shodan-key",
+                           help="Shodan API key for infrastructure discovery")
+    btp_group.add_argument("--censys-id",
+                           help="Censys API ID")
+    btp_group.add_argument("--censys-secret",
+                           help="Censys API secret")
+
     args = parser.parse_args()
 
-    if not args.hail_mary and not args.target and not args.target_file:
-        parser.error("At least one of --target, --target-file, or --hail-mary is required")
+    has_btp = (args.btp or args.btp_target or args.btp_discover or args.btp_domain
+               or args.btp_subaccount or args.btp_targets)
+    if not args.hail_mary and not args.target and not args.target_file and not has_btp:
+        parser.error("At least one of --target, --target-file, --hail-mary, or --btp* is required")
 
     global VERBOSE
     VERBOSE = args.verbose
@@ -6566,83 +6637,134 @@ examples:
                 targets.append(h)
                 existing.add(h)
 
-    if not targets:
+    if not targets and not has_btp:
         print("[-] No valid targets specified")
         sys.exit(1)
 
-    instances = parse_instance_range(args.instances)
-
-    print("[*] Targets: %s" % ", ".join(targets[:10]))
-    if len(targets) > 10:
-        print("    ... and %d more" % (len(targets) - 10))
-    print("[*] Instance range: %s" % ", ".join("%02d" % i for i in instances))
-    print("[*] Threads: %d, Timeout: %ds" % (args.threads, args.timeout))
-
-    scan_params = {
-        "targets": targets,
-        "instances": ["%02d" % i for i in instances],
-        "timeout": args.timeout,
-        "threads": args.threads,
-        "skip_vuln": args.skip_vuln,
-        "gw_test_cmd": args.gw_test_cmd,
-        "url_scan": not args.skip_url_scan,
-        "url_scan_threads": args.url_scan_threads,
-        "output": args.output or "auto",
-        "json_output": args.json_output or "not used",
-        "target_file": args.target_file or "not used",
-        "verbose": args.verbose,
-        "hail_mary": args.hail_mary,
-        "hail_mary_hosts_found": len(hail_mary_hosts),
-    }
-
     start_time = time.time()
+    landscape = []
+    btp_results = None
 
-    # Phase 1: Discovery
-    print("\n" + "=" * 60)
-    print(" Phase 1: System Discovery & Fingerprinting")
-    print("=" * 60)
-    landscape = discover_systems(targets, instances, args.timeout, args.threads, args.verbose)
+    # ── On-prem scanning ──
+    if targets:
+        instances = parse_instance_range(args.instances)
 
-    if not landscape:
-        print("\n[-] No SAP systems discovered")
-        sys.exit(0)
+        print("[*] Targets: %s" % ", ".join(targets[:10]))
+        if len(targets) > 10:
+            print("    ... and %d more" % (len(targets) - 10))
+        print("[*] Instance range: %s" % ", ".join("%02d" % i for i in instances))
+        print("[*] Threads: %d, Timeout: %ds" % (args.threads, args.timeout))
 
-    # Phase 2: Vulnerability Assessment
-    if not args.skip_vuln:
+        scan_params = {
+            "targets": targets,
+            "instances": ["%02d" % i for i in instances],
+            "timeout": args.timeout,
+            "threads": args.threads,
+            "skip_vuln": args.skip_vuln,
+            "gw_test_cmd": args.gw_test_cmd,
+            "url_scan": not args.skip_url_scan,
+            "url_scan_threads": args.url_scan_threads,
+            "output": args.output or "auto",
+            "json_output": args.json_output or "not used",
+            "target_file": args.target_file or "not used",
+            "verbose": args.verbose,
+            "hail_mary": args.hail_mary,
+            "hail_mary_hosts_found": len(hail_mary_hosts),
+        }
+
+        # Phase 1: Discovery
         print("\n" + "=" * 60)
-        print(" Phase 2: Vulnerability Assessment")
+        print(" Phase 1: System Discovery & Fingerprinting")
         print("=" * 60)
-        landscape = assess_vulnerabilities(landscape, args.gw_test_cmd, args.timeout + 2, args.verbose,
-                                            url_scan=not args.skip_url_scan,
-                                            url_scan_threads=args.url_scan_threads)
+        landscape = discover_systems(targets, instances, args.timeout, args.threads, args.verbose)
+
+        if not landscape and not has_btp:
+            print("\n[-] No SAP systems discovered")
+            sys.exit(0)
+
+        # Phase 2: Vulnerability Assessment
+        if landscape and not args.skip_vuln:
+            print("\n" + "=" * 60)
+            print(" Phase 2: Vulnerability Assessment")
+            print("=" * 60)
+            landscape = assess_vulnerabilities(landscape, args.gw_test_cmd, args.timeout + 2, args.verbose,
+                                                url_scan=not args.skip_url_scan,
+                                                url_scan_threads=args.url_scan_threads)
+        elif args.skip_vuln:
+            print("\n[*] Skipping vulnerability checks (--skip-vuln)")
     else:
-        print("\n[*] Skipping vulnerability checks (--skip-vuln)")
+        scan_params = {
+            "timeout": args.timeout,
+            "threads": args.threads,
+            "verbose": args.verbose,
+            "output": args.output or "auto",
+        }
+
+    # ── BTP Cloud Scanning ──
+    if has_btp:
+        print("\n" + "=" * 60)
+        print(" BTP Cloud Scanning")
+        print("=" * 60)
+        try:
+            from SAPology_btp import BTPScanner
+            btp_config = {
+                "target": args.btp_target,
+                "keyword": args.btp_discover,
+                "domain": args.btp_domain,
+                "subaccount": args.btp_subaccount,
+                "targets_file": args.btp_targets,
+                "regions": args.btp_regions,
+                "skip_ct": args.btp_skip_ct,
+                "skip_vuln": args.btp_skip_vuln,
+                "shodan_key": args.shodan_key,
+                "censys_id": args.censys_id,
+                "censys_secret": args.censys_secret,
+                "verbose": args.verbose,
+                "threads": args.threads,
+                "timeout": args.timeout,
+            }
+            btp_scanner = BTPScanner(btp_config)
+            btp_results = btp_scanner.run()
+        except ImportError:
+            print("[-] SAPology_btp.py not found — BTP scanning unavailable")
+        except Exception as e:
+            print("[-] BTP scanning error: %s" % e)
 
     scan_duration = time.time() - start_time
 
-    # Output
+    # ── Output ──
     print("\n" + "=" * 60)
     print(" Results")
     print("=" * 60)
-    print_terminal_summary(landscape)
+    if landscape:
+        print_terminal_summary(landscape)
 
     # Generate HTML report
     output_path = args.output
     if output_path is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = "SAPology_%s.html" % ts
-    print("\n[*] Generating HTML report: %s" % output_path)
-    generate_html_report(landscape, output_path, scan_duration, scan_params)
-    print("[+] HTML report saved to: %s" % output_path)
+        if has_btp and not landscape:
+            output_path = "SAPology_BTP_%s.html" % ts
+        elif has_btp:
+            output_path = "SAPology_Full_%s.html" % ts
+        else:
+            output_path = "SAPology_%s.html" % ts
+    if landscape or btp_results:
+        print("\n[*] Generating HTML report: %s" % output_path)
+        generate_html_report(landscape, output_path, scan_duration, scan_params,
+                             btp_results=btp_results)
+        print("[+] HTML report saved to: %s" % output_path)
 
     # Generate JSON export
     if args.json_output:
         print("[*] Generating JSON export: %s" % args.json_output)
-        generate_json_export(landscape, args.json_output)
+        generate_json_export(landscape, args.json_output, btp_results=btp_results)
         print("[+] JSON export saved to: %s" % args.json_output)
 
     # Summary
     total_findings = sum(len(s.all_findings()) for s in landscape)
+    if btp_results:
+        total_findings += btp_results.total_findings
     critical = sum(1 for s in landscape for f in s.all_findings() if f.severity == Severity.CRITICAL)
     dur_h = int(scan_duration // 3600)
     dur_m = int((scan_duration % 3600) // 60)

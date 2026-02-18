@@ -6,7 +6,7 @@
 <p align="center">
   <strong>SAP Network Topology Scanner</strong><br>
   <em>The scanner that speaks SAPanese</em><br>
-  Fluent in DIAG &middot; RFC &middot; Gateway &middot; MS &middot; ICM &middot; J2EE
+  Fluent in DIAG &middot; RFC &middot; Gateway &middot; MS &middot; ICM &middot; J2EE &middot; BTP Cloud
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
 
 ---
 
-SAPology is an **SAP security testing tool** for discovering, fingerprinting, and assessing SAP systems on a network. It combines port scanning, protocol-level fingerprinting (DIAG, RFC, Gateway, Message Server, ICM, SAPControl), and vulnerability assessment into a single self-contained scanner.
+SAPology is an **SAP security testing tool** for discovering, fingerprinting, and assessing SAP systems on a network. It combines port scanning, protocol-level fingerprinting (DIAG, RFC, Gateway, Message Server, ICM, SAPControl), and vulnerability assessment into a single self-contained scanner. It also includes a **BTP Cloud Scanner** for discovering and assessing SAP Business Technology Platform services exposed on the internet.
 
 ## Features
 
@@ -26,6 +26,7 @@ SAPology is an **SAP security testing tool** for discovering, fingerprinting, an
 - **Vulnerability assessment** - Checks for 15+ CVEs and misconfigurations including unprotected gateways (SAPXPG), open Message Server ports, HTTP smuggling, exposed admin consoles, SSL/TLS weaknesses, and HTTP verb tampering
 - **ICM URL scanning** - Tests 1,600+ SAP-specific URL paths per HTTP port for exposed endpoints
 - **Hail Mary mode** - Scans all RFC 1918 private subnets (~17.9M IPs) using async two-phase subnet sweeping
+- **BTP Cloud Scanner** - Discovers and assesses SAP BTP subaccounts, Cloud Foundry apps, XSUAA, CPI, and other cloud services via CT logs, DNS, Shodan, Censys, and Wayback Machine
 - **HTML & JSON reporting** - Rich interactive HTML reports and structured JSON exports
 - **Desktop GUI** - Native desktop interface with real-time dashboard, severity charts, and findings browser
 - **Windows standalone** - Pre-built `.exe` that runs without Python
@@ -52,6 +53,29 @@ python3 SAPology.py -t 192.168.1.100 --skip-vuln
 
 # Hail Mary - scan all private subnets
 python3 SAPology.py --hail-mary
+```
+
+### BTP Cloud Scanner
+
+```bash
+# Scan a known BTP endpoint
+python3 SAPology.py --btp-target myapp.cfapps.eu10.hana.ondemand.com
+
+# Discover BTP subdomains via Certificate Transparency logs
+python3 SAPology.py --btp-discover mycompany
+
+# Scan a custom domain mapped to BTP
+python3 SAPology.py --btp-target portal.mycompany.com
+
+# Scan from a file of BTP endpoints
+python3 SAPology.py --btp-targets btp_urls.txt
+
+# BTP standalone mode (no SAPology.py needed)
+python3 SAPology_btp.py -t myapp.cfapps.eu10.hana.ondemand.com
+python3 SAPology_btp.py -d mycompany -o btp_report.html
+
+# Combined on-prem + BTP scan
+python3 SAPology.py -t 10.0.0.0/24 --btp-discover mycompany
 ```
 
 ### Desktop GUI
@@ -167,6 +191,61 @@ usage: SAPology.py [-h] [--target TARGET] [--target-file TARGET_FILE]
 | `--hail-mary` | Scan all RFC 1918 private subnets |
 | `--hm-offsets` | Custom host offsets for hail-mary subnet sampling |
 
+## BTP Cloud Scanning
+
+The BTP Cloud Scanner (`SAPology_btp.py`) discovers and assesses SAP Business Technology Platform services exposed on the internet. It runs as a standalone tool or integrated into SAPology.
+
+### BTP Scan Phases
+
+1. **Discovery** — Find BTP endpoints via Certificate Transparency logs (crt.sh), DNS enumeration, Shodan, Censys, and Wayback Machine
+2. **Fingerprinting** — HTTP probing with 25+ SAP-specific paths, header analysis, TLS inspection, Cloud Foundry SSH detection (port 2222)
+3. **Vulnerability Assessment** — 17 security checks covering authentication, configuration exposure, CORS, transport security, and information disclosure
+
+### BTP Command-Line Flags
+
+When used via `SAPology.py`:
+
+| Flag | Description |
+|---|---|
+| `--btp` | Enable BTP cloud scanning mode |
+| `--btp-target` | BTP hostname(s) to scan (comma-separated) |
+| `--btp-discover` | Search CT logs for organization keyword |
+| `--btp-domain` | Target custom domain (e.g., `mycompany.com`) |
+| `--btp-subaccount` | Known subaccount identifier |
+| `--btp-targets` | File with BTP URLs (one per line) |
+| `--btp-regions` | Comma-separated BTP regions (default: `all`) |
+| `--btp-skip-ct` | Skip Certificate Transparency log search |
+| `--btp-skip-vuln` | Skip BTP vulnerability assessment |
+| `--shodan-key` | Shodan API key for infrastructure discovery |
+| `--censys-id` | Censys API ID |
+| `--censys-secret` | Censys API secret |
+
+When used standalone via `SAPology_btp.py`:
+
+| Flag | Description |
+|---|---|
+| `-t`, `--target` | BTP hostname(s) to scan (comma-separated) |
+| `-d`, `--discover` | Search CT logs for organization keyword |
+| `--domain` | Target custom domain |
+| `-s`, `--subaccount` | Known subaccount identifier |
+| `-T`, `--targets` | File with BTP URLs (one per line) |
+| `--regions` | Comma-separated BTP regions (default: `all`) |
+| `--skip-ct` | Skip Certificate Transparency log search |
+| `--skip-vuln` | Skip BTP vulnerability assessment |
+| `-o`, `--output` | HTML report output path |
+| `--json` | JSON export output path |
+| `-v`, `--verbose` | Verbose output |
+| `--threads` | Number of parallel threads (default: `20`) |
+| `--timeout` | Per-connection timeout in seconds (default: `5`) |
+
+### BTP Supported Regions
+
+`eu10`, `eu20`, `eu30`, `us10`, `us20`, `us30`, `ap10`, `ap11`, `ap20`, `ap21`, `jp10`, `jp20`, `br10`, `ca10`
+
+### BTP Service Types Detected
+
+Cloud Foundry apps, Neo apps, XSUAA/IAS authentication, Cloud Integration (CPI), Launchpad/Work Zone, Portal, API Management, HANA Cloud, HDI containers, and custom domains mapped to BTP.
+
 ## GUI Features
 
 The desktop GUI provides a real-time dashboard with:
@@ -207,6 +286,30 @@ SAPology tests for the following CVEs and misconfigurations during Phase 2 asses
 | SSL/TLS weaknesses | -- | SSLv3, TLS 1.0/1.1, self-signed certificates |
 | HTTP verb tampering | -- | Authentication bypass via HEAD/OPTIONS methods |
 | Info disclosure | -- | /sap/public/info endpoint exposing system details |
+
+## BTP Vulnerability Checks
+
+The BTP Cloud Scanner tests for the following security issues:
+
+| Check ID | Severity | Description |
+|---|---|---|
+| BTP-SSH-001 | HIGH | Cloud Foundry SSH enabled (Diego proxy on port 2222) — see [SAP Note 3395594](https://me.sap.com/notes/3395594) |
+| BTP-SSH-002 | MEDIUM | Cloud infrastructure details leaked via reverse DNS |
+| BTP-AUTH-001 | CRITICAL | Unauthenticated access to application data |
+| BTP-AUTH-002 | HIGH | OData $metadata endpoint exposed without authentication |
+| BTP-AUTH-003 | MEDIUM | OAuth token endpoint publicly reachable |
+| BTP-CFG-001 | MEDIUM | xs-app.json routing configuration exposed |
+| BTP-CFG-002 | LOW | manifest.json application metadata exposed |
+| BTP-CFG-003 | HIGH | Spring Boot Actuator endpoints publicly accessible |
+| BTP-CFG-004 | CRITICAL | Spring Boot Actuator /env endpoint leaking secrets |
+| BTP-CFG-005 | LOW | Swagger/OpenAPI documentation publicly accessible |
+| BTP-CORS-001 | MEDIUM | Wildcard CORS policy (Access-Control-Allow-Origin: *) |
+| BTP-CORS-002 | MEDIUM | CORS accepts null origin |
+| BTP-HDR-001 | LOW | Missing HSTS header (Strict-Transport-Security) |
+| BTP-TLS-001 | MEDIUM | Legacy TLS versions enabled (TLS 1.0/1.1) |
+| BTP-INFO-001 | MEDIUM | Error pages leaking stack traces or internal paths |
+| BTP-INFO-002 | LOW | Server version information disclosed |
+| BTP-INFO-003 | HIGH | Debug/trace mode enabled in production |
 
 ## Disclaimer
 
