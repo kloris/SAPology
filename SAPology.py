@@ -4022,6 +4022,34 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
              if sp.get("hail_mary") else "No",
          "No", "Scan all RFC 1918 private subnets"),
     ]
+
+    # Add BTP options if BTP params are present
+    if sp.get("btp_target") or sp.get("btp_discover") or sp.get("btp_domain") \
+       or sp.get("btp_subaccount") or sp.get("btp_targets") or btp_results:
+        options_spec.extend([
+            ("--btp-target", html.escape(sp.get("btp_target", "")) or "not used", "not used",
+             "BTP hostname(s) to scan (comma-separated)"),
+            ("--btp-discover", html.escape(sp.get("btp_discover", "")) or "not used", "not used",
+             "Search CT logs for organization keyword"),
+            ("--btp-domain", html.escape(sp.get("btp_domain", "")) or "not used", "not used",
+             "Target custom domain"),
+            ("--btp-subaccount", html.escape(sp.get("btp_subaccount", "")) or "not used", "not used",
+             "Known BTP subaccount identifier"),
+            ("--btp-targets", html.escape(sp.get("btp_targets", "")) or "not used", "not used",
+             "File with BTP URLs (one per line)"),
+            ("--btp-regions", sp.get("btp_regions", "all"), "all",
+             "BTP regions to scan"),
+            ("--btp-skip-ct", "Yes" if sp.get("btp_skip_ct") else "No", "No",
+             "Skip Certificate Transparency log search"),
+            ("--btp-skip-vuln", "Yes" if sp.get("btp_skip_vuln") else "No", "No",
+             "Skip BTP vulnerability assessment"),
+            ("--shodan-key", sp.get("shodan_key", "") or "not used", "not used",
+             "Shodan API key for infrastructure discovery"),
+            ("--censys-id", sp.get("censys_id", "") or "not used", "not used",
+             "Censys API ID"),
+            ("--censys-secret", sp.get("censys_secret", "") or "not used", "not used",
+             "Censys API secret"),
+        ])
     for opt, value, default, description in options_spec:
         # Highlight non-default values
         is_default = (value == default)
@@ -6671,6 +6699,18 @@ examples:
             "hail_mary": args.hail_mary,
             "hail_mary_hosts_found": len(hail_mary_hosts),
         }
+        if has_btp:
+            scan_params["btp_target"] = args.btp_target or ""
+            scan_params["btp_discover"] = args.btp_discover or ""
+            scan_params["btp_domain"] = args.btp_domain or ""
+            scan_params["btp_subaccount"] = args.btp_subaccount or ""
+            scan_params["btp_targets"] = args.btp_targets or ""
+            scan_params["btp_regions"] = args.btp_regions or "all"
+            scan_params["btp_skip_ct"] = args.btp_skip_ct
+            scan_params["btp_skip_vuln"] = args.btp_skip_vuln
+            scan_params["shodan_key"] = "***" if args.shodan_key else ""
+            scan_params["censys_id"] = "***" if args.censys_id else ""
+            scan_params["censys_secret"] = "***" if args.censys_secret else ""
 
         # Phase 1: Discovery
         print("\n" + "=" * 60)
@@ -6698,6 +6738,17 @@ examples:
             "threads": args.threads,
             "verbose": args.verbose,
             "output": args.output or "auto",
+            "btp_target": args.btp_target or "",
+            "btp_discover": args.btp_discover or "",
+            "btp_domain": args.btp_domain or "",
+            "btp_subaccount": args.btp_subaccount or "",
+            "btp_targets": args.btp_targets or "",
+            "btp_regions": args.btp_regions or "all",
+            "btp_skip_ct": args.btp_skip_ct,
+            "btp_skip_vuln": args.btp_skip_vuln,
+            "shodan_key": "***" if args.shodan_key else "",
+            "censys_id": "***" if args.censys_id else "",
+            "censys_secret": "***" if args.censys_secret else "",
         }
 
     # ── BTP Cloud Scanning ──
