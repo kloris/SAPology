@@ -5632,6 +5632,20 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
 
                     if ms_ssl:
                         print("[+] %s - MS internal port %d uses SSL/mTLS — protected" % (inst_label, port))
+                        inst.findings.append(Finding(
+                            name="Message Server Internal Port SSL/mTLS Enabled",
+                            severity=Severity.INFO,
+                            description=(
+                                "The SAP Message Server internal port %d has SSL with "
+                                "mutual TLS (client certificate authentication) enabled "
+                                "via system/secure_communications. Anonymous connections "
+                                "are rejected, protecting against rogue Application "
+                                "Server registration and gateway pivoting attacks." % port
+                            ),
+                            remediation="No action required — this is a secure configuration.",
+                            detail="TLS handshake requires SAP-signed client certificate (mTLS)",
+                            port=port,
+                        ))
                         step()  # skip internal open check
                         step()  # skip ACL check
                     else:
