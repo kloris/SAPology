@@ -946,8 +946,9 @@ GUI_HTML = r"""<!DOCTYPE html>
   .console-toggle.maximized { bottom: calc(100vh - 64px); }
   .console-header { padding: 6px 16px; font-size: 11px; color: var(--text-dim); border-bottom: 1px solid #1c2333; display: flex; justify-content: space-between; align-items: center; }
   .console-header .console-actions { display: flex; gap: 12px; }
-  .console-header .console-actions span { cursor: pointer; opacity: 0.6; transition: opacity 0.15s; }
+  .console-header .console-actions span { cursor: pointer; opacity: 0.7; transition: opacity 0.15s; font-size: 13px; }
   .console-header .console-actions span:hover { opacity: 1; color: var(--text); }
+  .console-header .console-actions span#consoleMaxBtn { font-size: 16px; line-height: 1; padding: 0 2px; }
   .console-body {
     flex: 1;
     overflow-y: auto;
@@ -2206,6 +2207,7 @@ function toggleConsole() {
     }
     panel.classList.toggle('open');
     toggle.classList.toggle('open');
+    toggle.innerHTML = panel.classList.contains('open') ? '&#9660; Console' : '&#9650; Console';
     var body = document.getElementById('console-body');
     body.scrollTop = body.scrollHeight;
 }
@@ -2217,6 +2219,7 @@ function toggleConsoleMax() {
     if (!panel.classList.contains('open')) {
         panel.classList.add('open');
         toggle.classList.add('open');
+        toggle.innerHTML = '&#9660; Console';
     }
     panel.classList.toggle('maximized');
     toggle.classList.toggle('maximized');
