@@ -5252,18 +5252,20 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
     # Pre-count total check steps for progress tracking
     total_checks = 0
     for sys_obj in landscape:
+        is_java = "JAVA" in sys_obj.system_type
         for inst in sys_obj.instances:
             if inst.services.get("gateway"):
                 total_checks += 2  # SAPXPG + monitor
             if inst.services.get("ms_internal"):
                 total_checks += 2  # internal + ACL
             http_ports = _get_instance_http_ports(inst)
-            total_checks += len(http_ports)      # CVE-2020-6287 (RECON)
-            total_checks += len(http_ports)      # CVE-2025-31324
+            if is_java:
+                total_checks += len(http_ports)      # CVE-2020-6287 (RECON)
+                total_checks += len(http_ports)      # CVE-2025-31324
+                total_checks += len(http_ports)      # CVE-2020-6207 (SolMan EEM)
+                total_checks += len(http_ports)      # CVE-2010-5326 (Invoker Servlet)
+                total_checks += len(http_ports)      # CVE-2021-33690 (NWDI CBS)
             total_checks += len(http_ports)      # CVE-2022-22536 (ICMAD)
-            total_checks += len(http_ports)      # CVE-2020-6207 (SolMan EEM)
-            total_checks += len(http_ports)      # CVE-2010-5326 (Invoker Servlet)
-            total_checks += len(http_ports)      # CVE-2021-33690 (NWDI CBS)
             total_checks += len(http_ports)      # CVE-2020-6308 (BO SSRF)
             total_checks += len(http_ports)      # info leak
             if inst.services.get("sapcontrol"):
@@ -5395,25 +5397,30 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                     print("[*] %s - Checking HTTP vulnerabilities on %d port(s) ..." % (
                         inst_label, len(http_ports)))
 
-                # Check each HTTP port for CVE-2020-6287 (RECON)
-                for port, use_ssl in http_ports:
-                    if cancelled():
-                        break
-                    log_verbose("  Checking CVE-2020-6287 (RECON) on %s:%d ..." % (inst.ip, port))
-                    f = check_cve_2020_6287(inst.ip, port, use_ssl, timeout)
-                    if f:
-                        inst.findings.append(f)
-                    step()
+                # Java-only CVE checks
+                is_java = "JAVA" in sys_obj.system_type
 
-                # Check each HTTP port for CVE-2025-31324
-                for port, use_ssl in http_ports:
-                    if cancelled():
-                        break
-                    log_verbose("  Checking CVE-2025-31324 on %s:%d ..." % (inst.ip, port))
-                    f = check_cve_2025_31324(inst.ip, port, use_ssl, timeout)
-                    if f:
-                        inst.findings.append(f)
-                    step()
+                # Check each HTTP port for CVE-2020-6287 (RECON) — Java only
+                if is_java:
+                    for port, use_ssl in http_ports:
+                        if cancelled():
+                            break
+                        log_verbose("  Checking CVE-2020-6287 (RECON) on %s:%d ..." % (inst.ip, port))
+                        f = check_cve_2020_6287(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
+
+                # Check each HTTP port for CVE-2025-31324 — Java only
+                if is_java:
+                    for port, use_ssl in http_ports:
+                        if cancelled():
+                            break
+                        log_verbose("  Checking CVE-2025-31324 on %s:%d ..." % (inst.ip, port))
+                        f = check_cve_2025_31324(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
 
                 if cancelled():
                     break
@@ -5435,41 +5442,44 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                 if cancelled():
                     break
 
-                # Check CVE-2020-6207 (Solution Manager EEM)
-                for port, use_ssl in http_ports:
+                # Check CVE-2020-6207 (Solution Manager EEM) — Java only
+                if is_java:
+                    for port, use_ssl in http_ports:
+                        if cancelled():
+                            break
+                        log_verbose("  Checking CVE-2020-6207 (SolMan EEM) on %s:%d ..." % (inst.ip, port))
+                        f = check_cve_2020_6207(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
+
                     if cancelled():
                         break
-                    log_verbose("  Checking CVE-2020-6207 (SolMan EEM) on %s:%d ..." % (inst.ip, port))
-                    f = check_cve_2020_6207(inst.ip, port, use_ssl, timeout)
-                    if f:
-                        inst.findings.append(f)
-                    step()
 
-                if cancelled():
-                    break
+                # Check CVE-2010-5326 (Invoker Servlet) — Java only
+                if is_java:
+                    for port, use_ssl in http_ports:
+                        if cancelled():
+                            break
+                        log_verbose("  Checking CVE-2010-5326 (Invoker Servlet) on %s:%d ..." % (inst.ip, port))
+                        f = check_cve_2010_5326(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
 
-                # Check CVE-2010-5326 (Invoker Servlet)
-                for port, use_ssl in http_ports:
                     if cancelled():
                         break
-                    log_verbose("  Checking CVE-2010-5326 (Invoker Servlet) on %s:%d ..." % (inst.ip, port))
-                    f = check_cve_2010_5326(inst.ip, port, use_ssl, timeout)
-                    if f:
-                        inst.findings.append(f)
-                    step()
 
-                if cancelled():
-                    break
-
-                # Check CVE-2021-33690 (NWDI CBS SSRF)
-                for port, use_ssl in http_ports:
-                    if cancelled():
-                        break
-                    log_verbose("  Checking CVE-2021-33690 (NWDI CBS) on %s:%d ..." % (inst.ip, port))
-                    f = check_cve_2021_33690(inst.ip, port, use_ssl, timeout)
-                    if f:
-                        inst.findings.append(f)
-                    step()
+                # Check CVE-2021-33690 (NWDI CBS SSRF) — Java only
+                if is_java:
+                    for port, use_ssl in http_ports:
+                        if cancelled():
+                            break
+                        log_verbose("  Checking CVE-2021-33690 (NWDI CBS) on %s:%d ..." % (inst.ip, port))
+                        f = check_cve_2021_33690(inst.ip, port, use_ssl, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
 
                 if cancelled():
                     break
