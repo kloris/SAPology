@@ -919,9 +919,55 @@ def fingerprint_gateway(host, port, timeout=3):
     return info
 
 
+def _ms_try_ssl(host, port, timeout=3):
+    """Probe whether a port speaks TLS (SAP secure communications).
+
+    Returns dict with ssl info if TLS is detected, None otherwise.
+    When system/secure_communications is enabled, the MS internal port
+    requires mutual TLS with a SAP-signed client certificate.
+    """
+    raw = None
+    try:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw.settimeout(timeout)
+        raw.connect((host, port))
+        try:
+            sock = ctx.wrap_socket(raw)
+            # Handshake succeeded — SSL without mandatory client cert
+            sock.close()
+            return {"ssl": True, "mtls_required": False}
+        except ssl.SSLError as e:
+            try:
+                raw.close()
+            except Exception:
+                pass
+            raw = None
+            err = str(e).lower()
+            # handshake_failure (alert 40) = server requires client cert
+            # certificate_unknown (alert 46) = server rejected our cert
+            if "handshake_failure" in err or "certificate" in err:
+                return {"ssl": True, "mtls_required": True}
+            return None
+    except Exception:
+        if raw:
+            try:
+                raw.close()
+            except Exception:
+                pass
+        return None
+
+
 def fingerprint_ms_internal(host, port, timeout=3):
-    """Try anonymous MS_LOGIN_2 on a message server internal port."""
+    """Try anonymous MS_LOGIN_2 on a message server internal port.
+
+    If plain TCP fails with a connection reset (indicating the port requires
+    SSL), falls back to an SSL probe to detect SAP secure communications.
+    """
     info = {"type": "ms_internal", "accessible": False}
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
@@ -939,11 +985,24 @@ def fingerprint_ms_internal(host, port, timeout=3):
                 if flag == MS_FLAG_REPLY:
                     info["login_ok"] = True
         sock.close()
+    except (ConnectionResetError, ConnectionError):
+        # Plain TCP rejected — probe for SSL (system/secure_communications)
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+        ssl_info = _ms_try_ssl(host, port, timeout)
+        if ssl_info:
+            info["accessible"] = True
+            info["ssl"] = True
+            info["mtls_required"] = ssl_info.get("mtls_required", False)
     except Exception:
-        try:
-            sock.close()
-        except Exception:
-            pass
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
     return info
 
 
@@ -5116,34 +5175,38 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     log_verbose("  Checking MS internal on port %d ..." % port)
                     ms_info = fingerprint_ms_internal(target_ip, port, timeout)
                     if ms_info.get("accessible"):
-                        instance.services["ms_internal"] = {"port": port}
+                        ms_ssl = ms_info.get("ssl", False)
+                        instance.services["ms_internal"] = {"port": port, "ssl": ms_ssl}
 
-                        # Try to get dump info for kernel version
-                        dump = query_ms_dump_info(target_ip, port, timeout)
-                        if dump.get("kernel_release"):
-                            instance.info["kernel_release"] = dump["kernel_release"]
-                            sys_obj.kernel = dump["kernel_release"]
-                        if dump.get("patch_number"):
-                            instance.info["patch_number"] = dump["patch_number"]
+                        if ms_ssl:
+                            log_verbose("  MS internal port %d requires SSL (mTLS) — encrypted" % port)
+                        else:
+                            # Plain TCP — query dump info and server list
+                            dump = query_ms_dump_info(target_ip, port, timeout)
+                            if dump.get("kernel_release"):
+                                instance.info["kernel_release"] = dump["kernel_release"]
+                                sys_obj.kernel = dump["kernel_release"]
+                            if dump.get("patch_number"):
+                                instance.info["patch_number"] = dump["patch_number"]
 
-                        # Try to get server list
-                        servers = query_ms_server_list(target_ip, port, timeout)
-                        if servers:
-                            for srv in servers:
-                                name = srv.get("client_name", "")
-                                parts = name.split("_")
-                                if len(parts) >= 3:
-                                    srv_sid = parts[-2]
-                                    if not sid_found:
-                                        sys_obj.sid = srv_sid
-                                        sid_found = True
-                                    if srv.get("hostaddrv4") and srv["hostaddrv4"] != target_ip:
-                                        sys_obj.relationships.append({
-                                            "sid": srv_sid,
-                                            "host": srv.get("hostname", ""),
-                                            "ip": srv.get("hostaddrv4", ""),
-                                        })
-                            instance.info["ms_servers"] = str(len(servers)) + " servers"
+                            # Try to get server list
+                            servers = query_ms_server_list(target_ip, port, timeout)
+                            if servers:
+                                for srv in servers:
+                                    name = srv.get("client_name", "")
+                                    parts = name.split("_")
+                                    if len(parts) >= 3:
+                                        srv_sid = parts[-2]
+                                        if not sid_found:
+                                            sys_obj.sid = srv_sid
+                                            sid_found = True
+                                        if srv.get("hostaddrv4") and srv["hostaddrv4"] != target_ip:
+                                            sys_obj.relationships.append({
+                                                "sid": srv_sid,
+                                                "host": srv.get("hostname", ""),
+                                                "ip": srv.get("hostaddrv4", ""),
+                                            })
+                                instance.info["ms_servers"] = str(len(servers)) + " servers"
 
                 # Dispatcher
                 elif "Dispatcher" in svc_desc:
@@ -5565,17 +5628,23 @@ def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
                 ms_svc = inst.services.get("ms_internal")
                 if ms_svc and not cancelled():
                     port = ms_svc["port"]
+                    ms_ssl = ms_svc.get("ssl", False)
 
-                    print("[*] %s - Checking message server on port %d ..." % (inst_label, port))
-                    f = check_ms_internal_open(inst.ip, port, timeout)
-                    if f:
-                        inst.findings.append(f)
-                    step()
+                    if ms_ssl:
+                        print("[+] %s - MS internal port %d uses SSL/mTLS — protected" % (inst_label, port))
+                        step()  # skip internal open check
+                        step()  # skip ACL check
+                    else:
+                        print("[*] %s - Checking message server on port %d ..." % (inst_label, port))
+                        f = check_ms_internal_open(inst.ip, port, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
 
-                    f = check_ms_acl(inst.ip, port, timeout)
-                    if f:
-                        inst.findings.append(f)
-                    step()
+                        f = check_ms_acl(inst.ip, port, timeout)
+                        if f:
+                            inst.findings.append(f)
+                        step()
 
                 if cancelled():
                     break
