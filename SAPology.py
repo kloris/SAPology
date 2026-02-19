@@ -2660,37 +2660,227 @@ def check_cve_2025_31324(host, port, use_ssl=False, timeout=5):
 
 
 def check_sapcontrol_unprotected(host, port, use_ssl=False, timeout=5):
-    """Check if SAPControl protected methods respond without authentication."""
-    finding = None
-    scheme = "https" if use_ssl else "http"
+    """Check if SAPControl protected methods respond without authentication.
 
-    protected_methods = [
+    GetProcessList, GetInstanceProperties, and GetSystemInstanceList are
+    unprotected by default (SAP standard behaviour) and are NOT reported.
+    Only methods beyond these three indicate a misconfiguration.
+    """
+    finding = None
+
+    # Methods that are unprotected by default — not a finding
+    default_unprotected = {
         "GetProcessList",
         "GetInstanceProperties",
         "GetSystemInstanceList",
+    }
+
+    # Methods that should be protected — finding if accessible.
+    # Ordered with most commonly exposed / highest impact first.
+    # Testing stops once MAX_PROBE methods are confirmed accessible
+    # to avoid excessive scan time (~170 methods).
+    extra_methods = [
+        # High-impact: info disclosure & system control
         "GetVersionInfo",
+        "GetAccessPointList",
+        "GetEnvironment",
+        "GetAlertTree",
+        "GetAlerts",
+        "GetStartProfile",
+        "GetTraceFile",
+        "GetLogFileList",
+        "GetCallstack",
+        "GetQueueStatistic",
+        "GetSystemUpdateList",
+        "GetProcessParameter",
+        "ListLogFiles",
+        "ListDeveloperTraces",
+        "ListConfigFiles",
+        "ListSnapshots",
+        "ParameterValue",
+        "ReadConfigFile",
+        "ReadDeveloperTrace",
+        "ReadLogFile",
+        "ReadSnapshot",
+        "ReadDirectory",
+        "ReadFile",
+        "ReadProfileParameters",
+        "CheckParameter",
+        "AnalyseLogFiles",
+        "ConfigureLogFileList",
+        # ABAP-specific
+        "ABAPAcknowledgeAlerts",
+        "ABAPCheckRFCDestinations",
+        "ABAPGetComponentList",
+        "ABAPGetSystemWPTable",
+        "ABAPGetWPTable",
+        "ABAPReadRawSyslog",
+        "ABAPReadSyslog",
+        # J2EE-specific
+        "J2EEControlCluster",
+        "J2EEControlComponents",
+        "J2EEControlProcess",
+        "J2EEDisableDbgSession",
+        "J2EEEnableDbgSession",
+        "J2EEGetApplicationAliasList",
+        "J2EEGetCacheStatistic",
+        "J2EEGetCacheStatistic2",
+        "J2EEGetClusterMsgList",
+        "J2EEGetComponentList",
+        "J2EEGetEJBSessionList",
+        "J2EEGetProcessList",
+        "J2EEGetProcessList2",
+        "J2EEGetRemoteObjectList",
+        "J2EEGetSessionList",
+        "J2EEGetSharedTableInfo",
+        "J2EEGetThreadCallStack",
+        "J2EEGetThreadList",
+        "J2EEGetThreadList2",
+        "J2EEGetThreadTaskStack",
+        "J2EEGetVMGCHistory",
+        "J2EEGetVMGCHistory2",
+        "J2EEGetVMHeapInfo",
+        "J2EEGetWebSessionList",
+        "J2EEGetWebSessionList2",
+        # Enqueue server
+        "EnqGetLockTable",
+        "EnqGetStatistic",
+        "EnqRemoveLocks",
+        "EnqRemoveUserLocks",
+        # Gateway
+        "GWCancelConnections",
+        "GWDeleteClients",
+        "GWDeleteConnections",
+        "GWGetConnectionList",
+        "GWGetClientList",
+        # ICM
+        "ICMGetCacheEntries",
+        "ICMGetConnectionList",
+        "ICMGetProxyConnectionList",
+        "ICMGetThreadList",
+        # Web Dispatcher
+        "WebDispGetServerList",
+        "WebDispGetGroupList",
+        "WebDispGetVirtHostList",
+        "WebDispGetUrlPrefixList",
+        # HA / Cluster
+        "HACheckConfig",
+        "HACheckFailoverConfig",
+        "HACheckMaintenanceMode",
+        "HAFailoverToNode",
+        "HAGetFailoverConfig",
+        "HASetMaintenanceMode",
+        # Instance lifecycle (critical — can start/stop systems)
+        "InstanceStart",
+        "InstanceStop",
+        "RestartInstance",
+        "RestartService",
+        "RestartSystem",
+        "Start",
+        "StartBypassHA",
+        "StartSystem",
+        "Stop",
+        "StopBypassHA",
+        "StopService",
+        "StopSystem",
+        "Shutdown",
+        "Bootstrap",
+        "SendSignal",
+        "ShmDetach",
+        # PSE / Crypto
+        "CheckPSE",
+        "CreatePSECredential",
+        "DeletePSE",
+        "StorePSE",
+        "UpdateInstancePSE",
+        "UpdateSCSInstance",
+        "UpdateSystem",
+        "UpdateSystemPKI",
+        "CheckUpdateSystem",
+        # Snapshots
+        "CreateSnapshot",
+        "DeleteSnapshots",
+        # Process parameters
+        "SetProcessParameter",
+        "SetProcessParameter2",
+        # OS-level (critical)
+        "OSExecute",
+        # Monitoring agent methods
+        "GetAgentConfig",
+        "GetListOfMaByCusGrp",
+        "GetMcInLocalMs",
+        "GetMtesByRequestTable",
+        "GetMtListByMtclass",
+        "InfoGetTree",
+        "MscCustomizeWrite",
+        "MscDeleteLines",
+        "MscReadCache",
+        "MsGetLocalMsInfo",
+        "MsGetMteclsInLocalMs",
+        "MtChangeStatus",
+        "MtCustomizeWrite",
+        "MtDbsetToWpsetByTid",
+        "MtDestroyMarkNTry",
+        "MteGetByToolRunstatus",
+        "MtGetAllToCust",
+        "MtGetAllToolsToSet",
+        "MtGetMteinfo",
+        "MtGetTidByName",
+        "MtRead",
+        "MtReset",
+        "PerfCustomizeWrite",
+        "PerfRead",
+        "PerfReadSmoothData",
+        "ReferenceRead",
+        "Register",
+        "RequestLogonFile",
+        "SnglmgsCustomizeWrite",
+        "SystemObjectSetValue",
+        "TextAttrRead",
+        "ToolGetEffective",
+        "ToolSet",
+        "ToolSetRuntimeStatus",
+        "TriggerDataCollection",
+        "Unregister",
+        "UtilAlChangeStatus",
+        "UtilMtGetAidByTid",
+        "UtilMtGetTreeLocal",
+        "UtilMtReadAll",
+        "UtilReadRawalertByAid",
+        "UtilSnglmsgReadRawdata",
     ]
 
-    accessible_methods = []
-    for method in protected_methods:
+    MAX_PROBE = 10  # Stop after confirming this many accessible methods
+    accessible_extra = []
+    for method in extra_methods:
         result = query_sapcontrol_soap(host, port, method, use_ssl, timeout)
         if result.get("success"):
-            accessible_methods.append(method)
+            accessible_extra.append(method)
+            if len(accessible_extra) >= MAX_PROBE:
+                break
 
-    if accessible_methods:
+    if accessible_extra:
         finding = Finding(
             name="SAPControl SOAP Interface Unprotected",
             severity=Severity.MEDIUM,
             description=(
-                "The SAPControl SOAP interface on port %d responds to protected "
-                "methods without authentication. Information disclosure of system "
-                "configuration, process lists, and version details." % port
+                "The SAPControl SOAP interface on port %d responds to methods "
+                "beyond the default unprotected set (GetProcessList, "
+                "GetInstanceProperties, GetSystemInstanceList) without "
+                "authentication. This exposes additional system configuration, "
+                "version details, and operational data." % port
             ),
             remediation=(
                 "Set service/protectedwebmethods = SDEFAULT or configure "
-                "specific method restrictions. Apply SAP Note 1439348."
+                "specific method restrictions. Apply SAP Note 1439348. "
+                "See https://help.sap.com/docs/SUPPORT_CONTENT/si/3362959700.html"
+                "?locale=en-US for details."
             ),
-            detail="Accessible methods: %s" % ", ".join(accessible_methods),
+            detail="Accessible methods (beyond defaults): %s%s" % (
+                ", ".join(accessible_extra),
+                " (and likely more — stopped probing after %d)" % MAX_PROBE
+                    if len(accessible_extra) >= MAX_PROBE else "",
+            ),
             port=port,
         )
     return finding
