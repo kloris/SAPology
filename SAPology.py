@@ -2469,10 +2469,39 @@ def check_gw_sapxpg(host, port, sid, hostname, command, timeout=5, instance=None
                     executed = True
                     break
 
+        # Try to extract command output from the response.
+        # The SAPXPG response embeds stdout/stderr as readable ASCII
+        # strings after the STRTSTAT and LOG fields.
+        cmd_output = ""
+        if executed:
+            # Extract all readable ASCII strings from the response
+            # and filter out known protocol fields / noise
+            protocol_noise = {
+                "STRTSTAT", "XPGID", "CONVID", "EXTPROG", "PARAMS",
+                "LONG_PARAMS", "STDERRCNTL", "STDOUTCNTL", "STDINCNTL",
+                "TERMCNTL", "TRACECNTL", "LOG", "SAPXPG_START_XPG_LONG",
+                "MSG_SERVER", conv_id or "",
+            }
+            raw_strings = extract_ascii_strings(resp, 3)
+            # Look for output after STRTSTAT in the response
+            strt_pos = resp.find(b"STRTSTAT")
+            if strt_pos >= 0:
+                tail = resp[strt_pos:]
+                out_strings = extract_ascii_strings(tail, 3)
+                for s in out_strings:
+                    s_stripped = s.strip()
+                    if (s_stripped and s_stripped not in protocol_noise
+                            and not s_stripped.startswith(("SAPXPG", "SAP"))
+                            and len(s_stripped) > 2):
+                        cmd_output = s_stripped
+                        break
+
         if executed or conv_id:
             detail = "Gateway accepted SAPXPG connection (conv_id=%s)" % conv_id
             if executed:
                 detail += " - command '%s' was EXECUTED" % command
+                if cmd_output:
+                    detail += "\nCommand output: %s" % cmd_output
             finding = Finding(
                 name="Gateway SAPXPG Remote Command Execution",
                 severity=Severity.CRITICAL,
