@@ -4168,7 +4168,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         ("--skip-url-scan", "Yes" if not sp.get("url_scan", True) else "No", "No",
          "Skip ICM URL scanning (1633 paths)"),
         ("--url-scan-threads", str(sp.get("url_scan_threads", 25)), "25", "URL scan parallel threads"),
-        ("--gw-test-cmd", html.escape(sp.get("gw_test_cmd", "id")), "id",
+        ("--gw-test-cmd", html.escape(sp.get("gw_test_cmd", "whoami")), "whoami",
          "Command for gateway SAPXPG test"),
         ("--output, -o", html.escape(sp.get("output", "auto")), "auto",
          "HTML report output path"),
@@ -5400,7 +5400,7 @@ def _get_instance_p4_ports(inst):
     return p4_ports
 
 
-def assess_vulnerabilities(landscape, gw_cmd="id", timeout=5, verbose=False,
+def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
                            url_scan=False, url_scan_threads=25, cancel_check=None):
     """Phase 2: Run vulnerability checks against discovered systems.
 
@@ -6775,7 +6775,7 @@ examples:
                         help="Skip ICM URL scanning (1633 paths per HTTP port)")
     parser.add_argument("--url-scan-threads", type=int, default=25,
                         help="Parallel threads for URL scanning (default: 25)")
-    parser.add_argument("--gw-test-cmd", default="id",
+    parser.add_argument("--gw-test-cmd", default="whoami",
                         help="Command for gateway SAPXPG test (default: id)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Verbose output")
