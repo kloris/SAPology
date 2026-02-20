@@ -780,10 +780,6 @@ def build_port_list(instances, quick=False):
                 p = 50000 + inst_nr * 100 + offset
                 if p not in NON_SAP_PORTS and p not in SAP_FIXED_PORTS:
                     ports.append((p, "sap_5xx", inst_str, "SAP 5%02d%02d" % (inst_nr, offset)))
-            # Also scan MS internal port +1 (3901 for instance 00)
-            ms_alt = 3900 + inst_nr + 1
-            if ms_alt not in NON_SAP_PORTS and ms_alt not in SAP_FIXED_PORTS:
-                ports.append((ms_alt, "ms_internal", inst_str, "Message Server Internal (+1)"))
             # HANA SQL ports: 3NN13 (SystemDB), 3NN15 (first tenant)
             hana_sysdb = 30000 + inst_nr * 100 + 13
             hana_tenant = 30000 + inst_nr * 100 + 15
