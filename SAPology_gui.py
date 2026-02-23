@@ -965,6 +965,23 @@ GUI_HTML = r"""<!DOCTYPE html>
   .cl-err { color: #ef4444; }
   .cl-dim { color: #4a5568; }
 
+  /* Help button */
+  .nav-help { width: 26px; height: 26px; border-radius: 50%; background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-dim); font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; margin-right: 12px; }
+  .nav-help:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* Help modal */
+  .help-modal .modal-content { width: 900px; max-height: 85vh; }
+  .help-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
+  .help-table th { text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--border); color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .help-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+  .help-table td:first-child { color: var(--text); font-weight: 500; white-space: nowrap; }
+  .help-table .sev-crit { color: #ef4444; font-weight: 600; }
+  .help-table .sev-high { color: #f97316; font-weight: 600; }
+  .help-table .sev-med { color: #eab308; }
+  .help-table .sev-low { color: #3b82f6; }
+  .help-table .sev-info { color: #6b7280; }
+  .help-note { font-size: 11px; color: var(--text-dim); margin-top: 16px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
+
   /* Modal */
   .modal-overlay {
     display: none;
@@ -1065,6 +1082,7 @@ GUI_HTML = r"""<!DOCTYPE html>
   <div class="nav-tab" id="tab-urlscan" onclick="switchTab('urlscan')">URL Scan</div>
   <div class="nav-tab" id="tab-btp" onclick="switchTab('btp')" style="display:none;">BTP Cloud</div>
   <div class="nav-spacer"></div>
+  <div class="nav-help" onclick="toggleHelpModal()" title="Vulnerability Checks">?</div>
   <div class="nav-status" id="nav-status">
     <span class="dot" style="background:var(--success);"></span> Ready
   </div>
@@ -1312,6 +1330,81 @@ GUI_HTML = r"""<!DOCTYPE html>
       <span class="modal-close" onclick="toggleModal()">&times;</span>
     </div>
     <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="modal-overlay help-modal" id="helpModal" onclick="if(event.target===this)toggleHelpModal()">
+  <div class="modal-content">
+    <div class="modal-header">
+      <div class="modal-title">SAPology &mdash; Vulnerability Checks</div>
+      <span class="modal-close" onclick="toggleHelpModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+
+      <div class="modal-section">
+        <h4>On-Premises Vulnerability Checks</h4>
+        <table class="help-table">
+          <thead><tr><th>CVE / Check</th><th>CVSS</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>CVE-2025-31324 / CVE-2025-42999</td><td class="sev-crit">10.0 / 9.1</td><td>Visual Composer unauthenticated file upload + deserialization RCE</td></tr>
+            <tr><td>CVE-2022-22536 (ICMAD)</td><td class="sev-crit">10.0</td><td>HTTP request smuggling via ICM memory pipe desynchronization</td></tr>
+            <tr><td>CVE-2020-6287 (RECON)</td><td class="sev-crit">10.0</td><td>SAP LM Configuration Wizard missing authorization</td></tr>
+            <tr><td>CVE-2020-6207</td><td class="sev-crit">10.0</td><td>Solution Manager EEM missing authentication</td></tr>
+            <tr><td>CVE-2010-5326</td><td class="sev-crit">10.0</td><td>Invoker Servlet unauthenticated code execution</td></tr>
+            <tr><td>CVE-2022-41272</td><td class="sev-crit">9.9</td><td>SAP P4 service unauthenticated access (PI/PO JMS Connector)</td></tr>
+            <tr><td>CVE-2021-33690</td><td class="sev-crit">9.9</td><td>NWDI CBS server-side request forgery</td></tr>
+            <tr><td>CVE-2024-41730</td><td class="sev-crit">9.8</td><td>BusinessObjects SSO token theft via REST API</td></tr>
+            <tr><td>CVE-2025-0061</td><td class="sev-high">8.7</td><td>BusinessObjects BI Launch Pad session hijacking</td></tr>
+            <tr><td>CVE-2020-6308</td><td class="sev-med">5.3</td><td>BusinessObjects server-side request forgery</td></tr>
+            <tr><td>CVE-2021-21475</td><td class="sev-med">--</td><td>MDM missing authorization check</td></tr>
+            <tr><td>CVE-2021-21482</td><td class="sev-med">--</td><td>MDM information disclosure</td></tr>
+            <tr><td>Gateway SAPXPG RCE</td><td class="sev-crit">--</td><td>Unprotected gateway allows OS command execution</td></tr>
+            <tr><td>Message Server ACL</td><td class="sev-high">--</td><td>Internal MS port / monitor accessible from network</td></tr>
+            <tr><td>SAPControl exposure</td><td class="sev-high">--</td><td>Unprotected SOAP management interface</td></tr>
+            <tr><td>BO CMC exposed</td><td class="sev-high">--</td><td>BusinessObjects admin console accessible from network</td></tr>
+            <tr><td>BO CMS port exposed</td><td class="sev-high">--</td><td>CMS port reachable (CVE-2026-0485 / CVE-2026-0490)</td></tr>
+            <tr><td>Cloud Connector exposed</td><td class="sev-med">--</td><td>Administration port accessible from network</td></tr>
+            <tr><td>HANA SQL port exposed</td><td class="sev-high">--</td><td>Database ports accessible from network</td></tr>
+            <tr><td>SSL/TLS weaknesses</td><td class="sev-med">--</td><td>SSLv3, TLS 1.0/1.1, self-signed certificates</td></tr>
+            <tr><td>HTTP verb tampering</td><td class="sev-med">--</td><td>Authentication bypass via HEAD/OPTIONS methods</td></tr>
+            <tr><td>Info disclosure</td><td class="sev-low">--</td><td>/sap/public/info endpoint exposing system details</td></tr>
+            <tr><td>MS internal SSL/mTLS</td><td class="sev-info">--</td><td>Secure communications detected (informational)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal-section">
+        <h4>BTP Cloud Vulnerability Checks</h4>
+        <table class="help-table">
+          <thead><tr><th>Check ID</th><th>Severity</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>BTP-SSH-001</td><td class="sev-high">HIGH</td><td>Cloud Foundry SSH enabled (Diego proxy on port 2222)</td></tr>
+            <tr><td>BTP-SSH-002</td><td class="sev-med">MEDIUM</td><td>Cloud infrastructure details leaked via reverse DNS</td></tr>
+            <tr><td>BTP-SSH-003</td><td class="sev-med">MEDIUM</td><td>Outdated Diego SSH proxy (Terrapin CVE-2023-48795 risk)</td></tr>
+            <tr><td>BTP-AUTH-001</td><td class="sev-crit">CRITICAL</td><td>Unauthenticated access to application data</td></tr>
+            <tr><td>BTP-AUTH-002</td><td class="sev-high">HIGH</td><td>OData $metadata endpoint exposed without authentication</td></tr>
+            <tr><td>BTP-AUTH-003</td><td class="sev-med">MEDIUM</td><td>OAuth token endpoint publicly reachable</td></tr>
+            <tr><td>BTP-CFG-001</td><td class="sev-med">MEDIUM</td><td>xs-app.json routing configuration exposed</td></tr>
+            <tr><td>BTP-CFG-002</td><td class="sev-low">LOW</td><td>manifest.json application metadata exposed</td></tr>
+            <tr><td>BTP-CFG-003</td><td class="sev-high">HIGH</td><td>Spring Boot Actuator endpoints publicly accessible</td></tr>
+            <tr><td>BTP-CFG-004</td><td class="sev-crit">CRITICAL</td><td>Spring Boot Actuator /env endpoint leaking secrets</td></tr>
+            <tr><td>BTP-CFG-005</td><td class="sev-low">LOW</td><td>Swagger/OpenAPI documentation publicly accessible</td></tr>
+            <tr><td>BTP-CORS-001</td><td class="sev-med">MEDIUM</td><td>Wildcard CORS policy (Access-Control-Allow-Origin: *)</td></tr>
+            <tr><td>BTP-CORS-002</td><td class="sev-med">MEDIUM</td><td>CORS accepts null origin</td></tr>
+            <tr><td>BTP-HDR-001</td><td class="sev-low">LOW</td><td>Missing HSTS header (Strict-Transport-Security)</td></tr>
+            <tr><td>BTP-TLS-001</td><td class="sev-med">MEDIUM</td><td>Legacy TLS versions enabled (TLS 1.0/1.1)</td></tr>
+            <tr><td>BTP-INFO-001</td><td class="sev-med">MEDIUM</td><td>Error pages leaking stack traces or internal paths</td></tr>
+            <tr><td>BTP-INFO-002</td><td class="sev-low">LOW</td><td>Server version information disclosed</td></tr>
+            <tr><td>BTP-INFO-003</td><td class="sev-high">HIGH</td><td>Debug/trace mode enabled in production</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="help-note">
+        This tool is intended for <strong>authorized security testing</strong> only. Only use SAPology against systems you have explicit permission to test.
+      </div>
+
+    </div>
   </div>
 </div>
 
@@ -2020,6 +2113,7 @@ function getTimestamp() { var d=new Date(); return ('0'+d.getHours()).slice(-2)+
 function toggleFinding(i) { document.getElementById('fr-'+i).classList.toggle('expanded'); }
 function toggleBtpFinding(i) { document.getElementById('bfr-'+i).classList.toggle('expanded'); }
 function toggleModal() { document.getElementById('modal').classList.toggle('open'); }
+function toggleHelpModal() { document.getElementById('helpModal').classList.toggle('open'); }
 
 // === BTP Section Toggles ===
 function toggleBtpSection() {

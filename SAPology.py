@@ -6707,6 +6707,55 @@ def main():
         description="SAP Network Topology Scanner - Discover, fingerprint, and assess SAP systems",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+vulnerability checks (on-premises):
+  CVE / Check               CVSS         Description
+  ─────────────────────────────────────────────────────────────────────────
+  CVE-2025-31324/42999      10.0 / 9.1   Visual Composer unauth upload + deser RCE
+  CVE-2022-22536 (ICMAD)    10.0         HTTP request smuggling via ICM memory pipe
+  CVE-2020-6287 (RECON)     10.0         LM Configuration Wizard missing authz
+  CVE-2020-6207             10.0         Solution Manager EEM missing authentication
+  CVE-2010-5326             10.0         Invoker Servlet unauthenticated code exec
+  CVE-2022-41272            9.9          P4 service unauthenticated access (PI/PO)
+  CVE-2021-33690            9.9          NWDI CBS server-side request forgery
+  CVE-2024-41730            9.8          BusinessObjects SSO token theft via REST API
+  CVE-2025-0061             8.7          BusinessObjects session hijacking
+  CVE-2020-6308             5.3          BusinessObjects server-side request forgery
+  CVE-2021-21475            --           MDM missing authorization check
+  CVE-2021-21482            --           MDM information disclosure
+  Gateway SAPXPG RCE        --           Unprotected gateway allows OS command exec
+  Message Server ACL         --           Internal MS port accessible from network
+  SAPControl exposure        --           Unprotected SOAP management interface
+  BO CMC exposed             --           BusinessObjects admin console accessible
+  BO CMS port exposed        --           CMS port reachable (CVE-2026-0485/0490)
+  Cloud Connector exposed    --           Administration port accessible from network
+  HANA SQL port exposed      --           Database ports accessible from network
+  SSL/TLS weaknesses         --           SSLv3, TLS 1.0/1.1, self-signed certificates
+  HTTP verb tampering        --           Authentication bypass via HEAD/OPTIONS
+  Info disclosure            --           /sap/public/info exposing system details
+  MS internal SSL/mTLS       --           Secure communications detected (INFO)
+
+vulnerability checks (BTP cloud):
+  Check ID       Severity   Description
+  ─────────────────────────────────────────────────────────────────────────
+  BTP-SSH-001    HIGH       CF SSH enabled (Diego proxy on port 2222)
+  BTP-SSH-002    MEDIUM     Cloud infrastructure details leaked via rDNS
+  BTP-SSH-003    MEDIUM     Outdated Diego SSH proxy (Terrapin CVE-2023-48795)
+  BTP-AUTH-001   CRITICAL   Unauthenticated access to application data
+  BTP-AUTH-002   HIGH       OData $metadata endpoint exposed without auth
+  BTP-AUTH-003   MEDIUM     OAuth token endpoint publicly reachable
+  BTP-CFG-001    MEDIUM     xs-app.json routing configuration exposed
+  BTP-CFG-002    LOW        manifest.json application metadata exposed
+  BTP-CFG-003    HIGH       Spring Boot Actuator endpoints accessible
+  BTP-CFG-004    CRITICAL   Actuator /env endpoint leaking secrets
+  BTP-CFG-005    LOW        Swagger/OpenAPI documentation accessible
+  BTP-CORS-001   MEDIUM     Wildcard CORS policy (Allow-Origin: *)
+  BTP-CORS-002   MEDIUM     CORS accepts null origin
+  BTP-HDR-001    LOW        Missing HSTS header
+  BTP-TLS-001    MEDIUM     Legacy TLS versions enabled (TLS 1.0/1.1)
+  BTP-INFO-001   MEDIUM     Error pages leaking stack traces
+  BTP-INFO-002   LOW        Server version information disclosed
+  BTP-INFO-003   HIGH       Debug/trace mode enabled in production
+
 hail mary mode (--hail-mary):
   Scans ALL RFC 1918 private subnets for SAP systems:
     192.168.0.0/16   (65,536 IPs)
