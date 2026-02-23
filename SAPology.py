@@ -6776,7 +6776,7 @@ examples:
     parser.add_argument("--url-scan-threads", type=int, default=25,
                         help="Parallel threads for URL scanning (default: 25)")
     parser.add_argument("--gw-test-cmd", default="whoami",
-                        help="Command for gateway SAPXPG test (default: id)")
+                        help="Command for gateway SAPXPG test (default: whoami)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Verbose output")
     parser.add_argument("--hail-mary", action="store_true",

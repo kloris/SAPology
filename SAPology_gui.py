@@ -286,7 +286,7 @@ class SAPologyApi:
                 "instances": ["%02d" % i for i in instances],
                 "timeout": timeout_val,
                 "threads": threads_val,
-                "gw_test_cmd": config.get("gw_cmd", "id"),
+                "gw_test_cmd": config.get("gw_cmd", "whoami"),
                 "url_scan": config.get("url_scan", True),
                 "url_scan_threads": int(config.get("url_scan_threads", 25)),
                 "verbose": config.get("verbose", False),
@@ -324,7 +324,7 @@ class SAPologyApi:
 
                     self.landscape = SAPology.assess_vulnerabilities(
                         self.landscape,
-                        gw_cmd=config.get("gw_cmd", "id"),
+                        gw_cmd=config.get("gw_cmd", "whoami"),
                         timeout=timeout_val + 2,
                         verbose=config.get("verbose", False),
                         url_scan=config.get("url_scan", True),
@@ -1114,7 +1114,7 @@ GUI_HTML = r"""<!DOCTYPE html>
       </div>
       <div class="field-group">
         <div class="field-label">GW Test Command</div>
-        <input type="text" class="field-input" id="input-gw-cmd" value="id">
+        <input type="text" class="field-input" id="input-gw-cmd" value="whoami">
       </div>
     </div>
 
@@ -1459,7 +1459,7 @@ function startScan() {
         threads: parseInt(document.getElementById('input-threads').value) || 20,
         timeout: parseInt(document.getElementById('input-timeout').value) || 3,
         url_scan_threads: parseInt(document.getElementById('input-url-threads').value) || 25,
-        gw_cmd: document.getElementById('input-gw-cmd').value || 'id',
+        gw_cmd: document.getElementById('input-gw-cmd').value || 'whoami',
         vuln_assess: document.getElementById('toggle-vuln').classList.contains('on'),
         url_scan: document.getElementById('toggle-url-scan').classList.contains('on'),
         verbose: document.getElementById('toggle-verbose').classList.contains('on'),
