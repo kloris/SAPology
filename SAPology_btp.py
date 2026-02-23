@@ -1014,6 +1014,7 @@ class BTPVulnAssessor:
         """Run all applicable checks against an endpoint."""
         checks = [
             self.check_cf_ssh_enabled,
+            self.check_cf_ssh_outdated,
             self.check_cf_infrastructure_leak,
             self.check_unauthenticated_access,
             self.check_metadata_exposure,
@@ -1052,6 +1053,23 @@ class BTPVulnAssessor:
             return None
         if not ssh.get("is_diego"):
             return None
+
+        # Fingerprint Diego SSH version via KEXINIT analysis
+        # Store result on ssh_info so check_cf_ssh_outdated can reuse it
+        detail = "Banner: %s" % ssh.get("banner", "")
+        try:
+            from diego_ssh_fingerprint import fingerprint_diego_ssh
+            fp = fingerprint_diego_ssh(endpoint.hostname, 2222, timeout=self.timeout)
+            ssh["_diego_fp"] = fp
+            if fp.get("epoch") and fp.get("version_range"):
+                detail += " | Estimated Diego version: %s (%s)" % (
+                    fp["version_range"], fp.get("version_info", ""))
+                detail += " [estimate based on KEXINIT fingerprint]"
+                if not fp.get("has_kex_strict"):
+                    detail += " [Terrapin vulnerable: no kex-strict]"
+        except Exception:
+            pass
+
         return Finding(
             name="Cloud Foundry SSH enabled (Diego proxy exposed)",
             severity=Severity.HIGH,
@@ -1069,7 +1087,64 @@ class BTPVulnAssessor:
                 "See SAP Note 3395594 (https://me.sap.com/notes/3395594) "
                 "for guidance on securing CF SSH access in BTP."
             ),
-            detail="Banner: %s" % ssh.get("banner", ""),
+            detail=detail,
+            port=2222,
+        )
+
+    def check_cf_ssh_outdated(self, endpoint):
+        """BTP-SSH-003: Outdated Diego SSH proxy version (< v2.113.0)."""
+        ssh = endpoint.ssh_info
+        if not ssh.get("is_diego"):
+            return None
+        fp = ssh.get("_diego_fp")
+        if not fp or not fp.get("epoch"):
+            return None
+        # Epoch 4 (>= v2.113.0) is current; epochs 1-3 are outdated
+        if fp["epoch"] >= 4:
+            return None
+
+        version_range = fp.get("version_range", "unknown")
+        risks = []
+        if fp["epoch"] <= 2:
+            # No kex-strict → vulnerable to Terrapin (CVE-2023-48795)
+            risks.append(
+                "Vulnerable to Terrapin attack (CVE-2023-48795) — "
+                "kex-strict countermeasure is missing"
+            )
+        if fp.get("has_chacha20"):
+            risks.append(
+                "chacha20-poly1305 cipher still offered — removed in v2.113.0 "
+                "per SAP CFAR-1064 to harden against Terrapin"
+            )
+        if fp["epoch"] == 1:
+            risks.append(
+                "Uses Go SSH library defaults with a broad cipher/kex set "
+                "instead of hardcoded secure algorithm lists"
+            )
+
+        detail = "Estimated Diego version: %s (%s)" % (
+            version_range, fp.get("version_info", ""))
+        detail += " [estimate based on KEXINIT fingerprint]"
+        if risks:
+            detail += "\nRisks: " + "; ".join(risks)
+
+        return Finding(
+            name="Outdated Diego SSH proxy (< v2.113.0)",
+            severity=Severity.MEDIUM,
+            description=(
+                "The Diego SSH proxy appears to be running a version older than "
+                "v2.113.0 based on its SSH KEXINIT algorithm fingerprint. Older "
+                "versions may be vulnerable to the Terrapin attack (CVE-2023-48795) "
+                "and offer deprecated cipher suites such as chacha20-poly1305. "
+                "Note: this version estimate is based on algorithm negotiation "
+                "patterns and may not be 100%% conclusive."
+            ),
+            remediation=(
+                "Update the Cloud Foundry Diego release to v2.113.0 or later. "
+                "Contact SAP support if running on BTP to request platform updates. "
+                "See SAP CFAR-1064 for details on the chacha20 removal."
+            ),
+            detail=detail,
             port=2222,
         )
 
