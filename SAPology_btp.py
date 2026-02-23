@@ -803,6 +803,7 @@ class CFSSHScanner:
                     result["cloud_provider"] = provider_info["provider"]
                     result["cloud_region"] = provider_info.get("region", "unknown")
                     result["infrastructure_details"] = provider_info
+                    break  # Provider found, no need to check more IPs
 
             # If rDNS returned the custom domain itself (PTR override) or
             # didn't match a cloud provider, try constructing the AWS rDNS
@@ -816,26 +817,60 @@ class CFSSHScanner:
                         result["cloud_provider"] = provider_info["provider"]
                         result["cloud_region"] = provider_info.get("region", "unknown")
                         result["infrastructure_details"] = provider_info
+                        break  # Provider found, no need to check more IPs
 
-        # TCP connect and grab SSH banner
+        # TCP connect, grab SSH banner, and fingerprint in a single connection
+        # via fingerprint_diego_ssh (banner + KEXINIT in one handshake)
+        fp_imported = False
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(self.timeout)
-            sock.connect((hostname, self.DIEGO_PORT))
-            banner = sock.recv(256)
-            sock.close()
+            from diego_ssh_fingerprint import fingerprint_diego_ssh
+            fp_imported = True
+        except ImportError:
+            # Try BTP/ subdirectory (script may live there)
+            try:
+                import sys
+                import os
+                btp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "BTP")
+                if btp_dir not in sys.path:
+                    sys.path.insert(0, btp_dir)
+                from diego_ssh_fingerprint import fingerprint_diego_ssh
+                fp_imported = True
+            except ImportError:
+                pass
 
-            banner_str = banner.decode("utf-8", errors="replace").strip()
-            result["open"] = True
-            result["banner"] = banner_str
-            result["is_diego"] = self.DIEGO_BANNER in banner_str.lower()
-        except (socket.timeout, ConnectionRefusedError, OSError):
-            pass
+        if fp_imported:
+            try:
+                fp = fingerprint_diego_ssh(hostname, self.DIEGO_PORT, timeout=self.timeout)
+                if fp.get("open"):
+                    result["open"] = True
+                    result["banner"] = fp.get("banner", "")
+                    result["is_diego"] = fp.get("is_diego", False)
+                    result["_diego_fp"] = fp
+            except Exception:
+                pass
+        else:
+            # Fallback: simple banner grab if fingerprint module unavailable
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(self.timeout)
+                sock.connect((hostname, self.DIEGO_PORT))
+                banner = sock.recv(256)
+                sock.close()
+
+                banner_str = banner.decode("utf-8", errors="replace").strip()
+                result["open"] = True
+                result["banner"] = banner_str
+                result["is_diego"] = self.DIEGO_BANNER in banner_str.lower()
+            except (socket.timeout, ConnectionRefusedError, OSError):
+                pass
 
         return result
 
     def _probe_aws_rdns(self, ip):
-        """Try to find the AWS rDNS name for an IP by probing known regions."""
+        """Try to find the AWS rDNS name for an IP by probing known regions.
+
+        Uses concurrent DNS lookups for speed (worst case ~2s instead of ~38s).
+        """
         octets = ip.split(".")
         ip_slug = "-".join(octets)  # e.g., "3-70-38-218"
         # Try common AWS regions — the rDNS format is:
@@ -848,16 +883,27 @@ class CFSSHScanner:
             "ap-northeast-2", "ap-south-1",
             "sa-east-1", "ca-central-1", "me-south-1", "af-south-1",
         ]
-        for region in aws_regions:
+
+        def _try_region(region):
             candidate = "ec2-%s.%s.compute.amazonaws.com" % (ip_slug, region)
             try:
-                socket.setdefaulttimeout(2)
                 resolved = socket.getaddrinfo(candidate, None, socket.AF_INET)
                 resolved_ips = set(r[4][0] for r in resolved)
                 if ip in resolved_ips:
                     return candidate
             except (socket.gaierror, socket.timeout, OSError):
-                continue
+                pass
+            return None
+
+        with ThreadPoolExecutor(max_workers=len(aws_regions)) as executor:
+            futures = {executor.submit(_try_region, r): r for r in aws_regions}
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    # Cancel remaining lookups
+                    for f in futures:
+                        f.cancel()
+                    return result
         return None
 
     def _identify_cloud_provider(self, rdns):
@@ -1054,21 +1100,15 @@ class BTPVulnAssessor:
         if not ssh.get("is_diego"):
             return None
 
-        # Fingerprint Diego SSH version via KEXINIT analysis
-        # Store result on ssh_info so check_cf_ssh_outdated can reuse it
+        # Use fingerprint result from the SSH scan phase (already stored)
         detail = "Banner: %s" % ssh.get("banner", "")
-        try:
-            from diego_ssh_fingerprint import fingerprint_diego_ssh
-            fp = fingerprint_diego_ssh(endpoint.hostname, 2222, timeout=self.timeout)
-            ssh["_diego_fp"] = fp
-            if fp.get("epoch") and fp.get("version_range"):
-                detail += " | Estimated Diego version: %s (%s)" % (
-                    fp["version_range"], fp.get("version_info", ""))
-                detail += " [estimate based on KEXINIT fingerprint]"
-                if not fp.get("has_kex_strict"):
-                    detail += " [Terrapin vulnerable: no kex-strict]"
-        except Exception:
-            pass
+        fp = ssh.get("_diego_fp")
+        if fp and fp.get("epoch") and fp.get("version_range"):
+            detail += " | Estimated Diego version: %s (%s)" % (
+                fp["version_range"], fp.get("version_info", ""))
+            detail += " [estimate based on KEXINIT fingerprint]"
+            if not fp.get("has_kex_strict"):
+                detail += " [Terrapin vulnerable: no kex-strict]"
 
         return Finding(
             name="Cloud Foundry SSH enabled (Diego proxy exposed)",
@@ -2226,10 +2266,12 @@ class BTPScanner:
                         pass
 
     def _assess(self, endpoints):
-        """Run vulnerability checks with progress tracking."""
+        """Run vulnerability checks with progress tracking (parallelized)."""
         assessor = BTPVulnAssessor(timeout=self.timeout)
         total = len(endpoints)
         print("[*] Running vulnerability checks on %d endpoints ..." % total)
+
+        workers = min(total, self.threads, 10)
 
         if HAS_RICH:
             with Progress(
@@ -2241,21 +2283,37 @@ class BTPScanner:
                 TimeElapsedColumn(),
             ) as prog:
                 task = prog.add_task("Vulnerability assessment", total=total)
-                for ep in endpoints:
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = {executor.submit(assessor.assess, ep): ep for ep in endpoints}
+                    for future in as_completed(futures):
+                        if self._cancelled():
+                            for f in futures:
+                                f.cancel()
+                            print("\n[!] Scan cancelled by user")
+                            break
+                        try:
+                            future.result()
+                        except Exception:
+                            pass
+                        prog.update(task, advance=1)
+        else:
+            done = [0]
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(assessor.assess, ep): ep for ep in endpoints}
+                for future in as_completed(futures):
                     if self._cancelled():
+                        for f in futures:
+                            f.cancel()
                         print("\n[!] Scan cancelled by user")
                         break
-                    assessor.assess(ep)
-                    prog.update(task, advance=1)
-        else:
-            for i, ep in enumerate(endpoints):
-                if self._cancelled():
-                    print("\n[!] Scan cancelled by user")
-                    break
-                assessor.assess(ep)
-                pct = (i + 1) * 100 // total
-                sys.stdout.write("\r[*] Vulnerability assessment ... %d%%" % pct)
-                sys.stdout.flush()
+                    try:
+                        future.result()
+                    except Exception:
+                        pass
+                    done[0] += 1
+                    pct = done[0] * 100 // total
+                    sys.stdout.write("\r[*] Vulnerability assessment ... %d%%" % pct)
+                    sys.stdout.flush()
             sys.stdout.write("\r" + " " * 50 + "\r")
             sys.stdout.flush()
 
