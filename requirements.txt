@@ -1,0 +1,10 @@
+# SAPology - SAP Network Topology Scanner
+# Core dependencies
+requests>=2.22.0
+rich>=12.0.0
+
+# GUI (SAPology_gui.py)
+bottle>=0.12.0
+pywebview>=4.0.0
+
+# BTP scanner (SAPology_btp.py) — uses requests and rich (listed above)
