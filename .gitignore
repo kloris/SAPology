@@ -1,12 +1,43 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
 build/
 dist/
 *.spec
-*.egg-info/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
 .claude/
-old_reports/
-mockups/
+
+# Binaries
+*.exe
+
+# Scan output / reports
 SAPology_*.html
 SAPology_*.json
+SAPology_*.csv
+old_reports/
+mockups/
+
+# Target lists
+*_targets.txt
+
+# Secrets / credentials
+*.pem
+*.key
+*.crt
+.env
