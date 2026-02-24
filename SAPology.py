@@ -2839,7 +2839,12 @@ def check_sapcontrol_unprotected(host, port, use_ssl=False, timeout=5):
 
     MAX_PROBE = 10  # Stop after confirming this many accessible methods
     accessible_extra = []
-    for method in extra_methods:
+    total = len(extra_methods)
+    quarter = max(total // 4, 1)
+    for idx, method in enumerate(extra_methods):
+        if idx > 0 and idx % quarter == 0:
+            pct = idx * 100 // total
+            print("[*]   SAPControl progress: %d%% (%d/%d methods probed)" % (pct, idx, total))
         result = query_sapcontrol_soap(host, port, method, use_ssl, timeout)
         if result.get("success"):
             accessible_extra.append(method)
@@ -5010,7 +5015,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                         if use_ssl and not instance.services["sapcontrol"].get("ssl"):
                             instance.services["sapcontrol"] = {"port": port, "ssl": use_ssl}
                         continue
-                    log_verbose("  Querying SAPControl on port %d ..." % port)
+                    print("[*]   Querying SAPControl on port %d ..." % port)
 
                     props = query_sapcontrol_instance_properties(target_ip, port, use_ssl, timeout)
                     if props.get("success") and props.get("properties"):
@@ -5047,7 +5052,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                 # ICM HTTP
                 elif "ICM HTTP" in svc_desc or "HTTP" in svc_desc:
                     use_ssl = "HTTPS" in svc_desc or port in (443, 8443) or (inst_nr.isdigit() and port == 4300 + int(inst_nr))
-                    log_verbose("  Querying ICM on port %d (ssl=%s) ..." % (port, use_ssl))
+                    print("[*]   Querying ICM on port %d (ssl=%s) ..." % (port, use_ssl))
 
                     pub_info = query_sap_public_info(target_ip, port, use_ssl, timeout)
                     if pub_info.get("accessible"):
@@ -5144,7 +5149,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
 
                 # Gateway
                 elif "Gateway" in svc_desc:
-                    log_verbose("  Checking gateway on port %d ..." % port)
+                    print("[*]   Checking gateway on port %d ..." % port)
                     gw_info = fingerprint_gateway(target_ip, port, timeout)
                     if gw_info.get("accessible"):
                         instance.services["gateway"] = {"port": port}
@@ -5152,7 +5157,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     # RFC_SYSTEM_INFO probe — runs on any open 33XX port
                     # (does not require the v3 NOOP monitor to succeed)
                     if HAS_RFC_SYSINFO:
-                        log_verbose("  Probing RFC_SYSTEM_INFO on %s:%d ..." % (target_ip, port))
+                        print("[*]   Probing RFC_SYSTEM_INFO on %s:%d ..." % (target_ip, port))
                         try:
                             rfc = probe_sap_system(target_ip, port, timeout=max(timeout, 5))
                             if rfc.get("status") in ("rfc_success", "info_extracted", "partial_info"):
@@ -5202,7 +5207,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
 
                 # Message Server Internal
                 elif "Message Server Internal" in svc_desc:
-                    log_verbose("  Checking MS internal on port %d ..." % port)
+                    print("[*]   Checking MS internal on port %d ..." % port)
                     ms_info = fingerprint_ms_internal(target_ip, port, timeout)
                     if ms_info.get("accessible"):
                         ms_ssl = ms_info.get("ssl", False)
@@ -5240,13 +5245,13 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
 
                 # Dispatcher
                 elif "Dispatcher" in svc_desc:
-                    log_verbose("  Checking dispatcher on port %d ..." % port)
+                    print("[*]   Checking dispatcher on port %d ..." % port)
                     disp_info = fingerprint_dispatcher(target_ip, port, timeout)
                     if disp_info.get("accessible"):
                         instance.services["dispatcher"] = {"port": port}
 
                         # Scrape login screen info via DIAG protocol
-                        log_verbose("  Scraping DIAG login screen on %s:%d ..." % (target_ip, port))
+                        print("[*]   Scraping DIAG login screen on %s:%d ..." % (target_ip, port))
                         diag_info = query_diag_login_screen(target_ip, port, max(timeout + 5, 10))
                         if diag_info:
                             err = diag_info.pop("_error", None)
@@ -5271,13 +5276,19 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
 
                         # Client enumeration via DIAG
                         if HAS_CLIENT_ENUM and client_enum and not sys_obj.clients:
-                            log_verbose("  Enumerating SAP clients on %s:%d ..." % (target_ip, port))
+                            print("[*] %s:%d - Enumerating SAP clients via DIAG ..." % (target_ip, port))
                             try:
                                 result = enumerate_clients(target_ip, port, timeout=max(timeout, 5))
                                 if result.get("clients"):
                                     sys_obj.clients = sorted(result["clients"])
-                                    log_verbose("  Found %d client(s): %s" % (
-                                        len(sys_obj.clients), ", ".join(sys_obj.clients)))
+                                    if result.get("redirected"):
+                                        print("[*] %s:%d - Client redirection detected, default client: %s" % (
+                                            target_ip, port, ", ".join(sys_obj.clients)))
+                                    else:
+                                        print("[*] %s:%d - Found %d client(s): %s" % (
+                                            target_ip, port, len(sys_obj.clients), ", ".join(sys_obj.clients)))
+                                else:
+                                    print("[*] %s:%d - No clients found" % (target_ip, port))
                             except Exception:
                                 pass
 
@@ -5475,7 +5486,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
             if type_parts:
                 sys_obj.system_type = "+".join(type_parts)
         if sys_obj.system_type:
-            log_verbose("  System type detected: %s" % sys_obj.system_type)
+            print("[*]   System type detected: %s" % sys_obj.system_type)
 
         # Skip non-SAP systems: if no kernel version was identified and SID is
         # still UNKNOWN, the host has no confirmed SAP services (e.g. generic
