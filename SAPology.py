@@ -131,6 +131,12 @@ try:
 except ImportError:
     HAS_RFC_SYSINFO = False
 
+try:
+    from files.sap_client_enum import enumerate_clients
+    HAS_CLIENT_ENUM = True
+except ImportError:
+    HAS_CLIENT_ENUM = False
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SAPology Banner
@@ -602,6 +608,7 @@ class SAPSystem:
     os_type: str = ""
     sap_release: str = ""
     db_type: str = ""
+    clients: List[str] = field(default_factory=list)
     relationships: List[dict] = field(default_factory=list)
 
     def highest_severity(self) -> Optional[Severity]:
@@ -627,6 +634,7 @@ class SAPSystem:
             "os_type": self.os_type,
             "sap_release": self.sap_release,
             "db_type": self.db_type,
+            "clients": self.clients,
             "instances": [i.to_dict() for i in self.instances],
             "relationships": self.relationships,
         }
@@ -3830,8 +3838,8 @@ def generate_svg_topology(landscape):
 
     # Calculate box height based on max instances across systems
     max_insts = max(len(s.instances) for s in systems)
-    # Header(30) + instances label(20) + per-instance(16*N) + context lines(56) + padding(10)
-    box_h = 30 + 20 + max(max_insts, 1) * 16 + 56 + 10
+    # Header(30) + instances label(20) + per-instance(16*N) + context lines(72) + padding(10)
+    box_h = 30 + 20 + max(max_insts, 1) * 16 + 72 + 10
     box_h = max(box_h, 160)
 
     svg_w = cols * (box_w + margin_x) + margin_x
@@ -3924,6 +3932,14 @@ def generate_svg_topology(landscape):
             lines.append('<text x="%d" y="%d" fill="#7f8c8d" font-size="10" '
                          'font-family="monospace">Kernel: %s</text>'
                          % (x + 10, ctx_y, html.escape(sys_obj.kernel)))
+            ctx_y += 16
+        if sys_obj.clients:
+            clients_str = ", ".join(sys_obj.clients[:8])
+            if len(sys_obj.clients) > 8:
+                clients_str += " (+%d)" % (len(sys_obj.clients) - 8)
+            lines.append('<text x="%d" y="%d" fill="#7f8c8d" font-size="10" '
+                         'font-family="monospace">Clients: %s</text>'
+                         % (x + 10, ctx_y, html.escape(clients_str)))
 
         # Finding count
         fc = len(sys_obj.all_findings())
@@ -4060,6 +4076,8 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
             meta_parts.append("SAP Release: %s" % html.escape(sys_obj.sap_release))
         if sys_obj.db_type:
             meta_parts.append("DB: %s" % html.escape(sys_obj.db_type))
+        if sys_obj.clients:
+            meta_parts.append("Clients: %s" % html.escape(", ".join(sys_obj.clients)))
         meta_parts.append("Instances: %d" % len(sys_obj.instances))
         meta_str = " | ".join(meta_parts)
 
@@ -4487,6 +4505,7 @@ def print_terminal_summary(landscape):
         sys_table.add_column("Kernel", style="dim")
         sys_table.add_column("OS", style="dim")
         sys_table.add_column("DB", style="dim")
+        sys_table.add_column("Clients", style="magenta")
         sys_table.add_column("Instances", style="green")
         sys_table.add_column("Open Ports", style="yellow")
         sys_table.add_column("Findings", style="red")
@@ -4509,6 +4528,7 @@ def print_terminal_summary(landscape):
                 sys_obj.kernel or "N/A",
                 sys_obj.os_type or "",
                 sys_obj.db_type or "",
+                ", ".join(sys_obj.clients) if sys_obj.clients else "",
                 str(len(sys_obj.instances)),
                 ", ".join(str(p) for p in sorted(ports_all)),
                 finding_str,
@@ -4771,9 +4791,10 @@ def parse_instance_range(range_str):
 
 
 def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
-                     cancel_check=None):
+                     cancel_check=None, client_enum=True):
     """Phase 1: Discover SAP systems by port scanning and fingerprinting.
     cancel_check: callable returning True when scan should be aborted.
+    client_enum: if True, enumerate SAP clients via DIAG login probes.
     """
     landscape = []
 
@@ -5247,6 +5268,18 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                             diag_cpu = diag_info.get("CPUNAME", "")
                             if diag_cpu and not sys_obj.hostname:
                                 sys_obj.hostname = diag_cpu
+
+                        # Client enumeration via DIAG
+                        if HAS_CLIENT_ENUM and client_enum and not sys_obj.clients:
+                            log_verbose("  Enumerating SAP clients on %s:%d ..." % (target_ip, port))
+                            try:
+                                result = enumerate_clients(target_ip, port, timeout=max(timeout, 5))
+                                if result.get("clients"):
+                                    sys_obj.clients = sorted(result["clients"])
+                                    log_verbose("  Found %d client(s): %s" % (
+                                        len(sys_obj.clients), ", ".join(sys_obj.clients)))
+                            except Exception:
+                                pass
 
                 # MDM Server
                 elif "MDM" in svc_desc:

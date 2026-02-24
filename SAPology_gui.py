@@ -302,7 +302,8 @@ class SAPologyApi:
                 self.landscape = SAPology.discover_systems(
                     targets, instances, timeout_val, threads_val,
                     config.get("verbose", False),
-                    cancel_check=lambda: self.scan_cancelled)
+                    cancel_check=lambda: self.scan_cancelled,
+                    client_enum=config.get("client_enum", True))
 
                 if self.scan_cancelled:
                     print("\n[!] Scan cancelled by user")
@@ -1140,6 +1141,7 @@ GUI_HTML = r"""<!DOCTYPE html>
       <div class="section-title">FEATURES</div>
       <div class="toggle-row">Vulnerability Assessment <div class="toggle-switch on" id="toggle-vuln" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">URL Scanning <div class="toggle-switch on" id="toggle-url-scan" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row">Client Enumeration <div class="toggle-switch on" id="toggle-client-enum" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">Verbose Output <div class="toggle-switch" id="toggle-verbose" onclick="this.classList.toggle('on')"></div></div>
     </div>
 
@@ -1555,6 +1557,7 @@ function startScan() {
         gw_cmd: document.getElementById('input-gw-cmd').value || 'whoami',
         vuln_assess: document.getElementById('toggle-vuln').classList.contains('on'),
         url_scan: document.getElementById('toggle-url-scan').classList.contains('on'),
+        client_enum: document.getElementById('toggle-client-enum').classList.contains('on'),
         verbose: document.getElementById('toggle-verbose').classList.contains('on'),
         btp_target: btpTarget,
         btp_keyword: btpKeyword,
@@ -1963,6 +1966,7 @@ function showSystemModal(idx) {
         (sys.os_type ? '<div class="info-item"><span class="ik">OS</span><span class="iv">' + esc(sys.os_type) + '</span></div>' : '') +
         (sys.sap_release ? '<div class="info-item"><span class="ik">SAP Release</span><span class="iv">' + esc(sys.sap_release) + '</span></div>' : '') +
         (sys.db_type ? '<div class="info-item"><span class="ik">Database</span><span class="iv">' + esc(sys.db_type) + '</span></div>' : '') +
+        (sys.clients && sys.clients.length > 0 ? '<div class="info-item"><span class="ik">Clients</span><span class="iv">' + sys.clients.map(function(c){return esc(c);}).join(', ') + '</span></div>' : '') +
         '</div>';
 
     var ports = '<ul class="modal-ports">';
