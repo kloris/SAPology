@@ -69,20 +69,26 @@ WRONG_PASSWORD = "WRONG_PASSWORD"
 USER_LOCKED = "USER_LOCKED"
 USER_NOT_EXIST = "USER_NOT_EXIST"
 CLIENT_UNAVAIL = "CLIENT_UNAVAIL"
+NO_DIALOG_USER = "NO_DIALOG_USER"
 ERROR = "ERROR"
 
-# Patterns matched against raw DIAG response bytes
+# Patterns matched against raw DIAG response bytes.
+# Order matters: more specific patterns first.
 _PATTERNS = [
     (re.compile(rb'Enter a new password', re.IGNORECASE),            PASSWORD_CHANGE),
     (re.compile(rb'No authorization to logon', re.IGNORECASE),       NO_AUTH_LOGON),
     (re.compile(rb'Name or password is incorrect', re.IGNORECASE),   WRONG_PASSWORD),
+    (re.compile(rb'Password logon no longer possible', re.IGNORECASE), USER_LOCKED),
+    (re.compile(rb'Log on with a dialog user', re.IGNORECASE),       NO_DIALOG_USER),
     (re.compile(rb'User .{1,40} is locked', re.IGNORECASE),         USER_LOCKED),
     (re.compile(rb'User .{1,40} does not exist', re.IGNORECASE),    USER_NOT_EXIST),
     (re.compile(rb'Client \d{3} is not available', re.IGNORECASE),  CLIENT_UNAVAIL),
     (re.compile(rb'Client does not exist', re.IGNORECASE),          CLIENT_UNAVAIL),
 ]
 
-# Results that mean the password was correct (= finding)
+# Results that mean the password was confirmed correct (= finding).
+# NO_DIALOG_USER is NOT included: SAP rejects the user type BEFORE
+# checking the password, so it does not confirm the password is correct.
 FINDING_RESULTS = {SUCCESS, PASSWORD_CHANGE, NO_AUTH_LOGON}
 
 RESULT_DESCRIPTIONS = {
@@ -93,8 +99,14 @@ RESULT_DESCRIPTIONS = {
     USER_LOCKED:     "User is locked",
     USER_NOT_EXIST:  "User does not exist",
     CLIENT_UNAVAIL:  "Client not available",
+    NO_DIALOG_USER:  "Not a dialog user (password not checked by SAP)",
     ERROR:           "Connection error",
 }
+
+# Regex to detect SAP DIAG error messages: an "E:" prefix (optionally
+# preceded by a non-alpha byte like ? or /) followed by the error text.
+# This appears in all SAP error screens regardless of message content.
+_DIAG_ERROR_RE = re.compile(rb'[^A-Za-z]E: .{4,80}')
 
 
 def classify_login_response(resp_bytes):
@@ -105,11 +117,25 @@ def classify_login_response(resp_bytes):
     if not resp_bytes:
         return (ERROR, "Empty response")
 
+    # Match known SAP error messages first
     for pattern, result in _PATTERNS:
         if pattern.search(resp_bytes):
             return (result, RESULT_DESCRIPTIONS[result])
 
-    # No error pattern matched and response is substantial → likely success
+    # Check for any SAP DIAG error screen (E: prefix). This catches
+    # error messages we don't have specific patterns for (custom messages,
+    # different SAP languages, etc.)
+    if _DIAG_ERROR_RE.search(resp_bytes):
+        # Extract the error text for the detail string
+        m = _DIAG_ERROR_RE.search(resp_bytes)
+        try:
+            err_text = m.group(0)[1:].decode('ascii', errors='replace').strip()
+        except Exception:
+            err_text = "SAP error screen"
+        return (WRONG_PASSWORD, "Login rejected (%s)" % err_text)
+
+    # No error pattern at all: a real successful login returns a full
+    # SAP GUI menu screen (typically 2000+ bytes with no E: message).
     if len(resp_bytes) > 200:
         return (SUCCESS, RESULT_DESCRIPTIONS[SUCCESS])
 
@@ -184,15 +210,16 @@ def check_default_credentials(host, port, clients, timeout=5, verbose=False,
     """
     findings = []
     locked_users = set()
+    skip_users = set()  # users to skip entirely (locked, non-dialog type)
 
     for severity, user, password, target_clients in DEFAULT_CREDENTIALS:
         if cancel_check and cancel_check():
             break
 
-        # Skip if user is already locked
-        if user in locked_users:
+        # Skip if user is already locked or known non-dialog type
+        if user in skip_users:
             if verbose:
-                print("  [-] Skipping %s (already locked)" % user)
+                print("  [-] Skipping %s (locked or non-dialog user)" % user)
             continue
 
         # Determine which clients to test
@@ -209,17 +236,24 @@ def check_default_credentials(host, port, clients, timeout=5, verbose=False,
             if cancel_check and cancel_check():
                 break
 
-            # Stop probing this user if locked
-            if user in locked_users:
+            # Stop probing this user if locked or non-dialog
+            if user in skip_users:
                 break
 
             result, detail = try_login(host, port, client, user, password, timeout)
 
             if result == USER_LOCKED:
-                locked_users.add(user)
+                skip_users.add(user)
                 if verbose:
                     print("  [!] %s is locked on client %s — skipping further attempts" %
                           (user, client))
+                break
+
+            if result == NO_DIALOG_USER:
+                skip_users.add(user)
+                if verbose:
+                    print("  [!] %s is not a dialog user on client %s — "
+                          "password not verified, skipping" % (user, client))
                 break
 
             if result in FINDING_RESULTS:

@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>SAPology System Type Icons — SAP Design System Proposals</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 40px; }
+  h1 { text-align: center; color: #0070f2; font-size: 28px; margin-bottom: 4px; letter-spacing: -0.5px; }
+  .subtitle { text-align: center; color: #888; font-size: 13px; margin-bottom: 8px; }
+  .palette-note { text-align:center; color:#555; font-size:11px; margin-bottom:48px; max-width:800px; margin-left:auto; margin-right:auto; line-height:1.6; }
+  .palette-note code { background:#1a1a1a; padding:2px 6px; border-radius:3px; color:#788fa6; font-size:10px; }
+  h3 { color: #0070f2; font-size: 18px; margin: 52px 0 20px 0; border-bottom: 1px solid #1a1a1a; padding-bottom: 8px; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 20px; margin-bottom: 16px; }
+  .card { background: #111; border: 1px solid #1e1e1e; border-radius: 10px; padding: 18px 10px; text-align: center; transition: border-color 0.2s; }
+  .card:hover { border-color: #0070f2; }
+  .icon-wrap { display: flex; justify-content: center; align-items: center; height: 72px; margin-bottom: 10px; }
+  .label { font-size: 10px; color: #aaa; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sublabel { font-size: 9px; color: #444; margin-top: 3px; }
+  .color-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+  .context-section { margin-top: 56px; }
+  .mock-row { display: flex; align-items: center; gap: 12px; background: #111; border: 1px solid #1e1e1e; border-radius: 8px; padding: 10px 16px; margin: 6px 0; transition: border-color 0.2s; }
+  .mock-row:hover { border-color: #333; }
+  .mock-row .sid { font-weight: 700; font-size: 14px; color: #fff; min-width: 48px; }
+  .mock-row .type { font-size: 12px; color: #788fa6; min-width: 110px; }
+  .mock-row .host { font-size: 11px; color: #444; font-family: 'SF Mono', 'Cascadia Code', monospace; }
+  .mock-row .findings { font-size: 11px; color: #aa0808; margin-left: auto; }
+  .mock-row .findings.clean { color: #256f3a; }
+
+  .size-demo { display:flex; align-items:center; gap:24px; margin:12px 0; padding:12px 16px; background:#111; border:1px solid #1e1e1e; border-radius:8px; }
+  .size-demo span { font-size:10px; color:#555; }
+</style>
+</head>
+<body>
+
+<h1>SAPology System Type Icons</h1>
+<p class="subtitle">Proposals aligned with the SAP Fiori Horizon Design System</p>
+<p class="palette-note">
+  Colors sourced from SAP's official <code>sap_horizon</code> theme tokens
+  (<a href="https://github.com/SAP/theming-base-content" style="color:#0070f2;">theming-base-content</a>).
+  Using <code>sapAccentColor</code>, <code>sapChart_OrderedColor</code>, and <code>sapSemanticColor</code> values
+  to ensure visual consistency with SAP's own design language.
+</p>
+
+<!--
+  SAP Fiori Horizon Color Mapping:
+  ================================
+  ABAP           → sapBrandColor      #0070f2  (SAP Blue — primary product)
+  Java           → sapAccentColor1    #d27700  (amber — Java/coffee association)
+  ABAP+Java      → split blue/amber
+  BusinessObjects → sapChart_5         #8b47d7  (purple — BO's visual identity)
+  Cloud Connector → sapAccentColor7    #046c7a  (teal — cloud/connectivity)
+  Content Server  → sapPositiveColor   #256f3a  (green — content/docs)
+  SAP Router      → sapNeutralColor    #788fa6  (neutral blue-grey — infra)
+  MDM             → sapAccentColor5    #5d36ff  (indigo — data management)
+  HANA            → sapNegativeColor   #aa0808  (red — HANA brand identity)
+-->
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h3>Style E &mdash; SAP Horizon Filled (rounded rect, Fiori palette, white glyphs)</h3>
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="grid">
+
+  <!-- ABAP -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#0070f2"/>
+        <text x="24" y="21" text-anchor="middle" font-family="Inter, sans-serif" font-weight="800" font-size="9" fill="#fff" opacity="0.5">SAP</text>
+        <text x="24" y="34" text-anchor="middle" font-family="'SF Mono', monospace" font-weight="700" font-size="14" fill="#fff">AB</text>
+      </svg>
+    </div>
+    <div class="label">ABAP</div>
+    <div class="sublabel"><span class="color-dot" style="background:#0070f2"></span>sapBrandColor</div>
+  </div>
+
+  <!-- Java -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#d27700"/>
+        <!-- coffee cup -->
+        <rect x="15" y="19" width="14" height="14" rx="3" fill="none" stroke="#fff" stroke-width="2"/>
+        <path d="M29 23 Q34 23 34 27 Q34 31 29 31" fill="none" stroke="#fff" stroke-width="1.8"/>
+        <path d="M19 17 Q19.5 13 21 11" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
+        <path d="M24 17 Q24.5 13 26 11" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
+        <line x1="14" y1="35" x2="30" y2="35" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="label">Java</div>
+    <div class="sublabel"><span class="color-dot" style="background:#d27700"></span>sapAccentColor1</div>
+  </div>
+
+  <!-- ABAP+Java -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs>
+          <clipPath id="e-left"><rect x="4" y="4" width="20" height="40"/></clipPath>
+          <clipPath id="e-right"><rect x="24" y="4" width="20" height="40"/></clipPath>
+        </defs>
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#0070f2" clip-path="url(#e-left)"/>
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#d27700" clip-path="url(#e-right)"/>
+        <text x="15" y="30" text-anchor="middle" font-family="'SF Mono', monospace" font-weight="700" font-size="12" fill="#fff">A</text>
+        <text x="33" y="30" text-anchor="middle" font-family="'SF Mono', monospace" font-weight="700" font-size="12" fill="#fff">J</text>
+      </svg>
+    </div>
+    <div class="label">ABAP+Java</div>
+    <div class="sublabel">Split brand + accent1</div>
+  </div>
+
+  <!-- BusinessObjects -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#8b47d7"/>
+        <!-- bar chart with trend line -->
+        <rect x="12" y="28" width="5" height="10" rx="1" fill="#fff" opacity="0.85"/>
+        <rect x="20" y="22" width="5" height="16" rx="1" fill="#fff" opacity="0.85"/>
+        <rect x="28" y="16" width="5" height="22" rx="1" fill="#fff" opacity="0.85"/>
+        <!-- trend line -->
+        <polyline points="14.5,26 22.5,20 30.5,13" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+      </svg>
+    </div>
+    <div class="label">BusinessObjects</div>
+    <div class="sublabel"><span class="color-dot" style="background:#8b47d7"></span>sapChart_5</div>
+  </div>
+
+  <!-- Cloud Connector -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#046c7a"/>
+        <!-- cloud -->
+        <path d="M15 26 Q12 26 12 23 Q12 19 15.5 18.5 Q16 14 21 14 Q24 12 28 14.5 Q31 13 34 16 Q36 17 35.5 20 Q37 22 35.5 24 Q35 26 32 26 Z"
+              fill="#fff" opacity="0.9"/>
+        <!-- arrow down -->
+        <line x1="24" y1="29" x2="24" y2="37" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <polyline points="20,34 24,38 28,34" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="label">Cloud Connector</div>
+    <div class="sublabel"><span class="color-dot" style="background:#046c7a"></span>sapAccentColor7</div>
+  </div>
+
+  <!-- Content Server -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#256f3a"/>
+        <!-- document with folded corner -->
+        <path d="M16 10 L30 10 L36 16 L36 38 L16 38 Z" fill="#fff" opacity="0.9"/>
+        <path d="M30 10 L30 16 L36 16" fill="none" stroke="#256f3a" stroke-width="1.5"/>
+        <line x1="20" y1="22" x2="32" y2="22" stroke="#256f3a" stroke-width="1.5" opacity="0.4"/>
+        <line x1="20" y1="26" x2="32" y2="26" stroke="#256f3a" stroke-width="1.5" opacity="0.4"/>
+        <line x1="20" y1="30" x2="28" y2="30" stroke="#256f3a" stroke-width="1.5" opacity="0.4"/>
+      </svg>
+    </div>
+    <div class="label">Content Server</div>
+    <div class="sublabel"><span class="color-dot" style="background:#256f3a"></span>sapPositiveColor</div>
+  </div>
+
+  <!-- SAP Router -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#788fa6"/>
+        <!-- shield / firewall -->
+        <path d="M24 10 L36 16 L36 26 Q36 34 24 39 Q12 34 12 26 L12 16 Z" fill="#fff" opacity="0.9"/>
+        <!-- lock inside shield -->
+        <rect x="20" y="24" width="8" height="7" rx="1.5" fill="#788fa6"/>
+        <path d="M22 24 L22 21 Q22 18 24 18 Q26 18 26 21 L26 24" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="label">SAP Router</div>
+    <div class="sublabel"><span class="color-dot" style="background:#788fa6"></span>sapNeutralColor</div>
+  </div>
+
+  <!-- MDM -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#5d36ff"/>
+        <!-- hierarchy nodes -->
+        <rect x="19" y="10" width="10" height="7" rx="2" fill="#fff" opacity="0.9"/>
+        <rect x="8" y="28" width="10" height="7" rx="2" fill="#fff" opacity="0.9"/>
+        <rect x="30" y="28" width="10" height="7" rx="2" fill="#fff" opacity="0.9"/>
+        <!-- connecting lines -->
+        <line x1="24" y1="17" x2="24" y2="21" stroke="#fff" stroke-width="1.5" opacity="0.7"/>
+        <line x1="13" y1="21" x2="35" y2="21" stroke="#fff" stroke-width="1.5" opacity="0.7"/>
+        <line x1="13" y1="21" x2="13" y2="28" stroke="#fff" stroke-width="1.5" opacity="0.7"/>
+        <line x1="35" y1="21" x2="35" y2="28" stroke="#fff" stroke-width="1.5" opacity="0.7"/>
+      </svg>
+    </div>
+    <div class="label">MDM</div>
+    <div class="sublabel"><span class="color-dot" style="background:#5d36ff"></span>sapAccentColor5</div>
+  </div>
+
+  <!-- HANA -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="4" y="4" width="40" height="40" rx="8" fill="#aa0808"/>
+        <!-- column-store -->
+        <rect x="10" y="13" width="5" height="24" rx="1.5" fill="#fff" opacity="0.85"/>
+        <rect x="17.5" y="19" width="5" height="18" rx="1.5" fill="#fff" opacity="0.65"/>
+        <rect x="25" y="15" width="5" height="22" rx="1.5" fill="#fff" opacity="0.85"/>
+        <rect x="32.5" y="21" width="5" height="16" rx="1.5" fill="#fff" opacity="0.65"/>
+      </svg>
+    </div>
+    <div class="label">HANA</div>
+    <div class="sublabel"><span class="color-dot" style="background:#aa0808"></span>sapNegativeColor</div>
+  </div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h3>Style F &mdash; SAP Horizon Outlined (stroke-only, Fiori iconography style)</h3>
+<p style="color:#555; font-size:11px; margin:-12px 0 20px 0;">Follows SAP Fiori icon guidelines: 2px stroke, rounded joins, 48px canvas</p>
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="grid">
+
+  <!-- ABAP -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#0070f2" stroke-width="2"/>
+        <!-- curly braces -->
+        <path d="M17 14 Q14 14 14 17 L14 21 Q14 24 11 24 Q14 24 14 27 L14 31 Q14 34 17 34" fill="none" stroke="#0070f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M31 14 Q34 14 34 17 L34 21 Q34 24 37 24 Q34 24 34 27 L34 31 Q34 34 31 34" fill="none" stroke="#0070f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- dot in center -->
+        <circle cx="24" cy="24" r="2" fill="#0070f2"/>
+      </svg>
+    </div>
+    <div class="label">ABAP</div>
+    <div class="sublabel">Curly braces { }</div>
+  </div>
+
+  <!-- Java -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#d27700" stroke-width="2"/>
+        <!-- coffee cup outline -->
+        <rect x="14" y="18" width="15" height="15" rx="3" fill="none" stroke="#d27700" stroke-width="2"/>
+        <path d="M29 22 Q35 22 35 26 Q35 30 29 30" fill="none" stroke="#d27700" stroke-width="2"/>
+        <!-- steam -->
+        <path d="M18 16 C18 13 20 13 20 10" fill="none" stroke="#d27700" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M24 16 C24 13 26 13 26 10" fill="none" stroke="#d27700" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- saucer -->
+        <line x1="12" y1="36" x2="31" y2="36" stroke="#d27700" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="label">Java</div>
+    <div class="sublabel">Coffee cup</div>
+  </div>
+
+  <!-- ABAP+Java -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#555" stroke-width="2"/>
+        <line x1="24" y1="5" x2="24" y2="43" stroke="#333" stroke-width="1"/>
+        <!-- left: curly brace -->
+        <path d="M12 16 Q10 16 10 18 L10 22 Q10 24 8 24 Q10 24 10 26 L10 30 Q10 32 12 32" fill="none" stroke="#0070f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="17" cy="24" r="1.5" fill="#0070f2"/>
+        <!-- right: mini cup -->
+        <rect x="28" y="20" width="9" height="9" rx="2" fill="none" stroke="#d27700" stroke-width="1.8"/>
+        <path d="M37 23 Q40 23 40 25.5 Q40 28 37 28" fill="none" stroke="#d27700" stroke-width="1.5"/>
+        <path d="M30 18 C30 16 31 16 31 14" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="M34 18 C34 16 35 16 35 14" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/>
+        <line x1="27" y1="31" x2="38" y2="31" stroke="#d27700" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="label">ABAP+Java</div>
+    <div class="sublabel">Brace + Cup</div>
+  </div>
+
+  <!-- BusinessObjects -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#8b47d7" stroke-width="2"/>
+        <!-- area chart -->
+        <path d="M10 36 L10 28 L18 22 L26 26 L34 14 L38 18 L38 36 Z" fill="#8b47d7" opacity="0.15"/>
+        <polyline points="10,28 18,22 26,26 34,14 38,18" fill="none" stroke="#8b47d7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- baseline -->
+        <line x1="10" y1="36" x2="38" y2="36" stroke="#8b47d7" stroke-width="1.5" opacity="0.4"/>
+      </svg>
+    </div>
+    <div class="label">BusinessObjects</div>
+    <div class="sublabel">Area chart</div>
+  </div>
+
+  <!-- Cloud Connector -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#046c7a" stroke-width="2"/>
+        <!-- cloud outline -->
+        <path d="M14 28 Q10 28 10 24 Q10 19 15 18 Q15 13 21 13 Q25 11 29 14 Q32 12 36 16 Q39 17 38 21 Q40 23 38 26 Q37 28 33 28 Z"
+              fill="none" stroke="#046c7a" stroke-width="2" stroke-linejoin="round"/>
+        <!-- bidirectional arrows below -->
+        <line x1="17" y1="34" x2="31" y2="34" stroke="#046c7a" stroke-width="2" stroke-linecap="round"/>
+        <polyline points="19,32 17,34 19,36" fill="none" stroke="#046c7a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <polyline points="29,32 31,34 29,36" fill="none" stroke="#046c7a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="label">Cloud Connector</div>
+    <div class="sublabel">Cloud + link</div>
+  </div>
+
+  <!-- Content Server -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#256f3a" stroke-width="2"/>
+        <!-- stacked documents -->
+        <rect x="18" y="14" width="18" height="22" rx="2" fill="none" stroke="#256f3a" stroke-width="2"/>
+        <rect x="14" y="11" width="18" height="22" rx="2" fill="none" stroke="#256f3a" stroke-width="1" opacity="0.35"/>
+        <!-- text lines -->
+        <line x1="22" y1="21" x2="32" y2="21" stroke="#256f3a" stroke-width="1.5" opacity="0.5"/>
+        <line x1="22" y1="25" x2="32" y2="25" stroke="#256f3a" stroke-width="1.5" opacity="0.5"/>
+        <line x1="22" y1="29" x2="29" y2="29" stroke="#256f3a" stroke-width="1.5" opacity="0.5"/>
+      </svg>
+    </div>
+    <div class="label">Content Server</div>
+    <div class="sublabel">Documents</div>
+  </div>
+
+  <!-- SAP Router -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#788fa6" stroke-width="2"/>
+        <!-- network diamond -->
+        <polygon points="24,10 38,24 24,38 10,24" fill="none" stroke="#788fa6" stroke-width="2" stroke-linejoin="round"/>
+        <!-- arrows through -->
+        <line x1="18" y1="21" x2="30" y2="21" stroke="#788fa6" stroke-width="2" stroke-linecap="round"/>
+        <polyline points="27,18 30,21 27,24" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <line x1="30" y1="27" x2="18" y2="27" stroke="#788fa6" stroke-width="2" stroke-linecap="round"/>
+        <polyline points="21,24 18,27 21,30" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="label">SAP Router</div>
+    <div class="sublabel">Diamond router</div>
+  </div>
+
+  <!-- MDM -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#5d36ff" stroke-width="2"/>
+        <!-- org chart / hierarchy -->
+        <rect x="18" y="10" width="12" height="8" rx="2" fill="none" stroke="#5d36ff" stroke-width="2"/>
+        <rect x="7" y="30" width="12" height="8" rx="2" fill="none" stroke="#5d36ff" stroke-width="2"/>
+        <rect x="29" y="30" width="12" height="8" rx="2" fill="none" stroke="#5d36ff" stroke-width="2"/>
+        <path d="M24 18 L24 23 M13 23 L35 23 M13 23 L13 30 M35 23 L35 30" fill="none" stroke="#5d36ff" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="label">MDM</div>
+    <div class="sublabel">Org hierarchy</div>
+  </div>
+
+  <!-- HANA -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <rect x="5" y="5" width="38" height="38" rx="6" fill="none" stroke="#aa0808" stroke-width="2"/>
+        <!-- database cylinder + lightning bolt -->
+        <ellipse cx="24" cy="15" rx="12" ry="5" fill="none" stroke="#aa0808" stroke-width="2"/>
+        <line x1="12" y1="15" x2="12" y2="33" stroke="#aa0808" stroke-width="2"/>
+        <line x1="36" y1="15" x2="36" y2="33" stroke="#aa0808" stroke-width="2"/>
+        <ellipse cx="24" cy="33" rx="12" ry="5" fill="none" stroke="#aa0808" stroke-width="2"/>
+        <!-- speed bolt in center -->
+        <polygon points="26,19 22,26 26,26 22,33" fill="none" stroke="#aa0808" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="label">HANA</div>
+    <div class="sublabel">In-memory DB</div>
+  </div>
+
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h3>Style G &mdash; SAP Horizon Compact (pill badge with Fiori colors, for tables/lists)</h3>
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+
+  <svg width="78" height="26" viewBox="0 0 78 26">
+    <rect width="78" height="26" rx="13" fill="#0070f2"/>
+    <text x="11" y="17" font-family="'SF Mono', monospace" font-weight="700" font-size="10" fill="#fff" opacity="0.7">{}</text>
+    <text x="32" y="17" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#fff">ABAP</text>
+  </svg>
+
+  <svg width="72" height="26" viewBox="0 0 72 26">
+    <rect width="72" height="26" rx="13" fill="#d27700"/>
+    <circle cx="13" cy="13" r="3" fill="#fff" opacity="0.4"/>
+    <text x="24" y="17" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#fff">Java</text>
+  </svg>
+
+  <svg width="106" height="26" viewBox="0 0 106 26">
+    <rect width="53" height="26" rx="13" fill="#0070f2"/>
+    <rect x="49" width="57" height="26" rx="13" fill="#d27700"/>
+    <rect x="49" width="4" height="26" fill="#0070f2"/>
+    <text x="10" y="17" font-family="'SF Mono', monospace" font-weight="700" font-size="9" fill="#fff" opacity="0.7">{}</text>
+    <text x="26" y="17" font-family="Inter, sans-serif" font-weight="600" font-size="9" fill="#fff">AB</text>
+    <text x="60" y="17" font-family="Inter, sans-serif" font-weight="600" font-size="9" fill="#fff">Java</text>
+  </svg>
+
+  <svg width="56" height="26" viewBox="0 0 56 26">
+    <rect width="56" height="26" rx="13" fill="#8b47d7"/>
+    <text x="28" y="17" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#fff">BO</text>
+  </svg>
+
+  <svg width="66" height="26" viewBox="0 0 66 26">
+    <rect width="66" height="26" rx="13" fill="#046c7a"/>
+    <text x="33" y="17" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#fff">SCC</text>
+  </svg>
+
+  <svg width="86" height="26" viewBox="0 0 86 26">
+    <rect width="86" height="26" rx="13" fill="#256f3a"/>
+    <text x="43" y="17" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#fff">Content</text>
+  </svg>
+
+  <svg width="92" height="26" viewBox="0 0 92 26">
+    <rect width="92" height="26" rx="13" fill="#788fa6"/>
+    <text x="46" y="17" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#fff">SAProuter</text>
+  </svg>
+
+  <svg width="66" height="26" viewBox="0 0 66 26">
+    <rect width="66" height="26" rx="13" fill="#5d36ff"/>
+    <text x="33" y="17" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#fff">MDM</text>
+  </svg>
+
+  <svg width="76" height="26" viewBox="0 0 76 26">
+    <rect width="76" height="26" rx="13" fill="#aa0808"/>
+    <text x="38" y="17" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#fff">HANA</text>
+  </svg>
+
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h3>Style H &mdash; SAP Horizon Dark Circle (evening theme, subtle glow)</h3>
+<p style="color:#555; font-size:11px; margin:-12px 0 20px 0;">Matches dark-theme UIs like the SAPology GUI</p>
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="grid">
+
+  <!-- ABAP -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs><filter id="h1"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <circle cx="24" cy="24" r="20" fill="#0070f2" opacity="0.12"/>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#0070f2" stroke-width="1.5" filter="url(#h1)"/>
+        <path d="M17 14 Q14 14 14 17 L14 21 Q14 24 12 24 Q14 24 14 27 L14 31 Q14 34 17 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M31 14 Q34 14 34 17 L34 21 Q34 24 36 24 Q34 24 34 27 L34 31 Q34 34 31 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="24" cy="24" r="1.5" fill="#0070f2"/>
+      </svg>
+    </div>
+    <div class="label">ABAP</div>
+  </div>
+
+  <!-- Java -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs><filter id="h2"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <circle cx="24" cy="24" r="20" fill="#d27700" opacity="0.12"/>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#d27700" stroke-width="1.5" filter="url(#h2)"/>
+        <rect x="15" y="19" width="14" height="14" rx="3" fill="none" stroke="#d27700" stroke-width="1.8"/>
+        <path d="M29 23 Q34 23 34 27 Q34 31 29 31" fill="none" stroke="#d27700" stroke-width="1.5"/>
+        <path d="M19 17 C19 14 20.5 14 20.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="M24 17 C24 14 25.5 14 25.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/>
+        <line x1="14" y1="35" x2="30" y2="35" stroke="#d27700" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="label">Java</div>
+  </div>
+
+  <!-- ABAP+Java -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs>
+          <filter id="h3"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <linearGradient id="h3g" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="50%" stop-color="#0070f2"/>
+            <stop offset="50%" stop-color="#d27700"/>
+          </linearGradient>
+        </defs>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="url(#h3g)" stroke-width="1.5" filter="url(#h3)"/>
+        <!-- left brace -->
+        <path d="M14 17 Q12 17 12 19 L12 22 Q12 24 10 24 Q12 24 12 26 L12 29 Q12 31 14 31" fill="none" stroke="#0070f2" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- right cup -->
+        <rect x="29" y="20" width="8" height="8" rx="2" fill="none" stroke="#d27700" stroke-width="1.5"/>
+        <path d="M37 23 Q39.5 23 39.5 25 Q39.5 27 37 27" fill="none" stroke="#d27700" stroke-width="1.2"/>
+        <line x1="28" y1="30" x2="38" y2="30" stroke="#d27700" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="label">ABAP+Java</div>
+  </div>
+
+  <!-- BusinessObjects -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs><filter id="h4"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <circle cx="24" cy="24" r="20" fill="#8b47d7" opacity="0.12"/>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#8b47d7" stroke-width="1.5" filter="url(#h4)"/>
+        <rect x="13" y="27" width="5" height="9" rx="1" fill="#8b47d7" opacity="0.6"/>
+        <rect x="21" y="21" width="5" height="15" rx="1" fill="#8b47d7" opacity="0.75"/>
+        <rect x="29" y="15" width="5" height="21" rx="1" fill="#8b47d7" opacity="0.9"/>
+        <polyline points="15.5,25 23.5,19 31.5,12" fill="none" stroke="#8b47d7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+      </svg>
+    </div>
+    <div class="label">BusinessObjects</div>
+  </div>
+
+  <!-- Cloud Connector -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs><filter id="h5"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <circle cx="24" cy="24" r="20" fill="#046c7a" opacity="0.12"/>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#046c7a" stroke-width="1.5" filter="url(#h5)"/>
+        <path d="M14 26 Q11 26 11 23 Q11 19 14.5 18.5 Q15 14 20 14 Q23 12 27 14 Q30 12 33 15 Q36 16 35.5 19 Q37 21 35.5 23 Q35 26 32 26 Z"
+              fill="none" stroke="#046c7a" stroke-width="1.8" stroke-linejoin="round"/>
+        <line x1="18" y1="33" x2="30" y2="33" stroke="#046c7a" stroke-width="1.8" stroke-linecap="round"/>
+        <polyline points="20,31 18,33 20,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <polyline points="28,31 30,33 28,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="label">Cloud Connector</div>
+  </div>
+
+  <!-- Content Server -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs><filter id="h6"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <circle cx="24" cy="24" r="20" fill="#256f3a" opacity="0.12"/>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#256f3a" stroke-width="1.5" filter="url(#h6)"/>
+        <path d="M17 11 L29 11 L34 16 L34 37 L17 37 Z" fill="none" stroke="#256f3a" stroke-width="1.8"/>
+        <path d="M29 11 L29 16 L34 16" fill="none" stroke="#256f3a" stroke-width="1.5"/>
+        <line x1="20" y1="22" x2="30" y2="22" stroke="#256f3a" stroke-width="1" opacity="0.5"/>
+        <line x1="20" y1="26" x2="30" y2="26" stroke="#256f3a" stroke-width="1" opacity="0.5"/>
+        <line x1="20" y1="30" x2="27" y2="30" stroke="#256f3a" stroke-width="1" opacity="0.5"/>
+      </svg>
+    </div>
+    <div class="label">Content Server</div>
+  </div>
+
+  <!-- SAP Router -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs><filter id="h7"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <circle cx="24" cy="24" r="20" fill="#788fa6" opacity="0.12"/>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#788fa6" stroke-width="1.5" filter="url(#h7)"/>
+        <!-- shield -->
+        <path d="M24 10 L35 16 L35 26 Q35 34 24 38 Q13 34 13 26 L13 16 Z" fill="none" stroke="#788fa6" stroke-width="1.8" stroke-linejoin="round"/>
+        <!-- lock -->
+        <rect x="20" y="24" width="8" height="6" rx="1.5" fill="#788fa6" opacity="0.6"/>
+        <path d="M22 24 L22 21 Q22 18 24 18 Q26 18 26 21 L26 24" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="label">SAP Router</div>
+  </div>
+
+  <!-- MDM -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs><filter id="h8"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <circle cx="24" cy="24" r="20" fill="#5d36ff" opacity="0.12"/>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#5d36ff" stroke-width="1.5" filter="url(#h8)"/>
+        <rect x="18" y="10" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>
+        <rect x="7" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>
+        <rect x="29" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>
+        <path d="M24 17 L24 22 M13 22 L35 22 M13 22 L13 30 M35 22 L35 30" fill="none" stroke="#5d36ff" stroke-width="1.2"/>
+      </svg>
+    </div>
+    <div class="label">MDM</div>
+  </div>
+
+  <!-- HANA -->
+  <div class="card">
+    <div class="icon-wrap">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <defs><filter id="h9"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <circle cx="24" cy="24" r="20" fill="#aa0808" opacity="0.12"/>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#aa0808" stroke-width="1.5" filter="url(#h9)"/>
+        <ellipse cx="24" cy="15" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/>
+        <line x1="13" y1="15" x2="13" y2="33" stroke="#aa0808" stroke-width="1.8"/>
+        <line x1="35" y1="15" x2="35" y2="33" stroke="#aa0808" stroke-width="1.8"/>
+        <ellipse cx="24" cy="33" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/>
+        <polygon points="26,19 22,26 26,26 22,33" fill="none" stroke="#aa0808" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+      </svg>
+    </div>
+    <div class="label">HANA</div>
+  </div>
+
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="context-section">
+<h3>In Context &mdash; Style E (filled) at 24px next to system rows</h3>
+<!-- ════════════════════════════════════════════════════════════════════ -->
+
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="8" fill="#0070f2"/><text x="24" y="21" text-anchor="middle" font-family="Inter,sans-serif" font-weight="800" font-size="9" fill="#fff" opacity="0.5">SAP</text><text x="24" y="34" text-anchor="middle" font-family="monospace" font-weight="700" font-size="14" fill="#fff">AB</text></svg>
+  <span class="sid">PRD</span><span class="type">ABAP</span><span class="host">192.168.1.100 &middot; 3 inst &middot; SAP NetWeaver 7.50</span><span class="findings">5 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="8" fill="#d27700"/><rect x="15" y="19" width="14" height="14" rx="3" fill="none" stroke="#fff" stroke-width="2"/><path d="M29 23 Q34 23 34 27 Q34 31 29 31" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M19 17 Q19.5 13 21 11" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/><path d="M24 17 Q24.5 13 26 11" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/><line x1="14" y1="35" x2="30" y2="35" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+  <span class="sid">PO1</span><span class="type">Java</span><span class="host">192.168.1.101 &middot; 1 inst &middot; SAP PI/PO 7.50</span><span class="findings">12 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><clipPath id="z1"><rect x="4" y="4" width="20" height="40"/></clipPath><clipPath id="z2"><rect x="24" y="4" width="20" height="40"/></clipPath></defs><rect x="4" y="4" width="40" height="40" rx="8" fill="#0070f2" clip-path="url(#z1)"/><rect x="4" y="4" width="40" height="40" rx="8" fill="#d27700" clip-path="url(#z2)"/><text x="15" y="30" text-anchor="middle" font-family="monospace" font-weight="700" font-size="12" fill="#fff">A</text><text x="33" y="30" text-anchor="middle" font-family="monospace" font-weight="700" font-size="12" fill="#fff">J</text></svg>
+  <span class="sid">SM1</span><span class="type">ABAP+Java</span><span class="host">192.168.1.102 &middot; 2 inst &middot; Solution Manager 7.2</span><span class="findings">8 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="8" fill="#8b47d7"/><rect x="12" y="28" width="5" height="10" rx="1" fill="#fff" opacity="0.85"/><rect x="20" y="22" width="5" height="16" rx="1" fill="#fff" opacity="0.85"/><rect x="28" y="16" width="5" height="22" rx="1" fill="#fff" opacity="0.85"/></svg>
+  <span class="sid">BIP</span><span class="type">BusinessObjects</span><span class="host">192.168.1.110 &middot; 1 inst &middot; BO BI 4.3</span><span class="findings">3 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="8" fill="#046c7a"/><path d="M15 26 Q12 26 12 23 Q12 19 15.5 18.5 Q16 14 21 14 Q24 12 28 14.5 Q31 13 34 16 Q36 17 35.5 20 Q37 22 35.5 24 Q35 26 32 26 Z" fill="#fff" opacity="0.9"/><line x1="24" y1="29" x2="24" y2="37" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><polyline points="20,34 24,38 28,34" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <span class="sid">SCC</span><span class="type">Cloud Connector</span><span class="host">192.168.1.120 &middot; 1 inst &middot; SCC 2.16</span><span class="findings clean">1 finding</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="8" fill="#256f3a"/><path d="M16 10 L30 10 L36 16 L36 38 L16 38 Z" fill="#fff" opacity="0.9"/><path d="M30 10 L30 16 L36 16" fill="none" stroke="#256f3a" stroke-width="1.5"/><line x1="20" y1="22" x2="32" y2="22" stroke="#256f3a" stroke-width="1.5" opacity="0.4"/><line x1="20" y1="26" x2="32" y2="26" stroke="#256f3a" stroke-width="1.5" opacity="0.4"/><line x1="20" y1="30" x2="28" y2="30" stroke="#256f3a" stroke-width="1.5" opacity="0.4"/></svg>
+  <span class="sid">CS1</span><span class="type">Content Server</span><span class="host">192.168.1.130 &middot; 1 inst &middot; SAP CS 6.50</span><span class="findings clean">0 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="8" fill="#788fa6"/><path d="M24 10 L36 16 L36 26 Q36 34 24 39 Q12 34 12 26 L12 16 Z" fill="#fff" opacity="0.9"/><rect x="20" y="24" width="8" height="7" rx="1.5" fill="#788fa6"/><path d="M22 24 L22 21 Q22 18 24 18 Q26 18 26 21 L26 24" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round"/></svg>
+  <span class="sid">RTR</span><span class="type">SAP Router</span><span class="host">192.168.1.1 &middot; 1 inst</span><span class="findings clean">0 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="8" fill="#5d36ff"/><rect x="19" y="10" width="10" height="7" rx="2" fill="#fff" opacity="0.9"/><rect x="8" y="28" width="10" height="7" rx="2" fill="#fff" opacity="0.9"/><rect x="30" y="28" width="10" height="7" rx="2" fill="#fff" opacity="0.9"/><line x1="24" y1="17" x2="24" y2="21" stroke="#fff" stroke-width="1.5" opacity="0.7"/><line x1="13" y1="21" x2="35" y2="21" stroke="#fff" stroke-width="1.5" opacity="0.7"/><line x1="13" y1="21" x2="13" y2="28" stroke="#fff" stroke-width="1.5" opacity="0.7"/><line x1="35" y1="21" x2="35" y2="28" stroke="#fff" stroke-width="1.5" opacity="0.7"/></svg>
+  <span class="sid">MDM</span><span class="type">MDM</span><span class="host">192.168.1.140 &middot; 1 inst</span><span class="findings">2 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="8" fill="#aa0808"/><rect x="10" y="13" width="5" height="24" rx="1.5" fill="#fff" opacity="0.85"/><rect x="17.5" y="19" width="5" height="18" rx="1.5" fill="#fff" opacity="0.65"/><rect x="25" y="15" width="5" height="22" rx="1.5" fill="#fff" opacity="0.85"/><rect x="32.5" y="21" width="5" height="16" rx="1.5" fill="#fff" opacity="0.65"/></svg>
+  <span class="sid">HDB</span><span class="type">HANA</span><span class="host">192.168.1.200 &middot; 1 inst &middot; HANA 2.0 SPS07</span><span class="findings clean">1 finding</span>
+</div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="context-section">
+<h3>In Context &mdash; Style H (dark circle glow) at 24px</h3>
+
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c1"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="24" cy="24" r="20" fill="#0070f2" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#0070f2" stroke-width="1.5" filter="url(#c1)"/><path d="M17 14 Q14 14 14 17 L14 21 Q14 24 12 24 Q14 24 14 27 L14 31 Q14 34 17 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round"/><path d="M31 14 Q34 14 34 17 L34 21 Q34 24 36 24 Q34 24 34 27 L34 31 Q34 34 31 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round"/><circle cx="24" cy="24" r="1.5" fill="#0070f2"/></svg>
+  <span class="sid">PRD</span><span class="type">ABAP</span><span class="host">192.168.1.100 &middot; 3 inst &middot; SAP NetWeaver 7.50</span><span class="findings">5 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c2"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="24" cy="24" r="20" fill="#d27700" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#d27700" stroke-width="1.5" filter="url(#c2)"/><rect x="15" y="19" width="14" height="14" rx="3" fill="none" stroke="#d27700" stroke-width="1.8"/><path d="M29 23 Q34 23 34 27 Q34 31 29 31" fill="none" stroke="#d27700" stroke-width="1.5"/><path d="M19 17 C19 14 20.5 14 20.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/><path d="M24 17 C24 14 25.5 14 25.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/><line x1="14" y1="35" x2="30" y2="35" stroke="#d27700" stroke-width="1.8" stroke-linecap="round"/></svg>
+  <span class="sid">PO1</span><span class="type">Java</span><span class="host">192.168.1.101 &middot; 1 inst &middot; SAP PI/PO 7.50</span><span class="findings">12 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c3"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><linearGradient id="c3g" x1="0" y1="0" x2="1" y2="0"><stop offset="50%" stop-color="#0070f2"/><stop offset="50%" stop-color="#d27700"/></linearGradient></defs><circle cx="24" cy="24" r="20" fill="none" stroke="url(#c3g)" stroke-width="1.5" filter="url(#c3)"/><path d="M14 17 Q12 17 12 19 L12 22 Q12 24 10 24 Q12 24 12 26 L12 29 Q12 31 14 31" fill="none" stroke="#0070f2" stroke-width="1.5" stroke-linecap="round"/><rect x="29" y="20" width="8" height="8" rx="2" fill="none" stroke="#d27700" stroke-width="1.5"/><path d="M37 23 Q39.5 23 39.5 25 Q39.5 27 37 27" fill="none" stroke="#d27700" stroke-width="1.2"/><line x1="28" y1="30" x2="38" y2="30" stroke="#d27700" stroke-width="1.5" stroke-linecap="round"/></svg>
+  <span class="sid">SM1</span><span class="type">ABAP+Java</span><span class="host">192.168.1.102 &middot; 2 inst &middot; Solution Manager 7.2</span><span class="findings">8 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c4"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="24" cy="24" r="20" fill="#8b47d7" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#8b47d7" stroke-width="1.5" filter="url(#c4)"/><rect x="13" y="27" width="5" height="9" rx="1" fill="#8b47d7" opacity="0.6"/><rect x="21" y="21" width="5" height="15" rx="1" fill="#8b47d7" opacity="0.75"/><rect x="29" y="15" width="5" height="21" rx="1" fill="#8b47d7" opacity="0.9"/></svg>
+  <span class="sid">BIP</span><span class="type">BusinessObjects</span><span class="host">192.168.1.110 &middot; 1 inst &middot; BO BI 4.3</span><span class="findings">3 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c5"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="24" cy="24" r="20" fill="#046c7a" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#046c7a" stroke-width="1.5" filter="url(#c5)"/><path d="M14 26 Q11 26 11 23 Q11 19 14.5 18.5 Q15 14 20 14 Q23 12 27 14 Q30 12 33 15 Q36 16 35.5 19 Q37 21 35.5 23 Q35 26 32 26 Z" fill="none" stroke="#046c7a" stroke-width="1.8" stroke-linejoin="round"/><line x1="18" y1="33" x2="30" y2="33" stroke="#046c7a" stroke-width="1.8" stroke-linecap="round"/><polyline points="20,31 18,33 20,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="28,31 30,33 28,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <span class="sid">SCC</span><span class="type">Cloud Connector</span><span class="host">192.168.1.120 &middot; 1 inst &middot; SCC 2.16</span><span class="findings clean">1 finding</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c6"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="24" cy="24" r="20" fill="#256f3a" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#256f3a" stroke-width="1.5" filter="url(#c6)"/><path d="M17 11 L29 11 L34 16 L34 37 L17 37 Z" fill="none" stroke="#256f3a" stroke-width="1.8"/><path d="M29 11 L29 16 L34 16" fill="none" stroke="#256f3a" stroke-width="1.5"/></svg>
+  <span class="sid">CS1</span><span class="type">Content Server</span><span class="host">192.168.1.130 &middot; 1 inst</span><span class="findings clean">0 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c7"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="24" cy="24" r="20" fill="#788fa6" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#788fa6" stroke-width="1.5" filter="url(#c7)"/><path d="M24 10 L35 16 L35 26 Q35 34 24 38 Q13 34 13 26 L13 16 Z" fill="none" stroke="#788fa6" stroke-width="1.8" stroke-linejoin="round"/><rect x="20" y="24" width="8" height="6" rx="1.5" fill="#788fa6" opacity="0.6"/><path d="M22 24 L22 21 Q22 18 24 18 Q26 18 26 21 L26 24" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round"/></svg>
+  <span class="sid">RTR</span><span class="type">SAP Router</span><span class="host">192.168.1.1 &middot; 1 inst</span><span class="findings clean">0 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c8"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="24" cy="24" r="20" fill="#5d36ff" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#5d36ff" stroke-width="1.5" filter="url(#c8)"/><rect x="18" y="10" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/><rect x="7" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/><rect x="29" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/><path d="M24 17 L24 22 M13 22 L35 22 M13 22 L13 30 M35 22 L35 30" fill="none" stroke="#5d36ff" stroke-width="1.2"/></svg>
+  <span class="sid">MDM</span><span class="type">MDM</span><span class="host">192.168.1.140 &middot; 1 inst</span><span class="findings">2 findings</span>
+</div>
+<div class="mock-row">
+  <svg width="24" height="24" viewBox="0 0 48 48"><defs><filter id="c9"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="24" cy="24" r="20" fill="#aa0808" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#aa0808" stroke-width="1.5" filter="url(#c9)"/><ellipse cx="24" cy="15" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/><line x1="13" y1="15" x2="13" y2="33" stroke="#aa0808" stroke-width="1.8"/><line x1="35" y1="15" x2="35" y2="33" stroke="#aa0808" stroke-width="1.8"/><ellipse cx="24" cy="33" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/><polygon points="26,19 22,26 26,26 22,33" fill="none" stroke="#aa0808" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/></svg>
+  <span class="sid">HDB</span><span class="type">HANA</span><span class="host">192.168.1.200 &middot; 1 inst &middot; HANA 2.0 SPS07</span><span class="findings clean">1 finding</span>
+</div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="context-section">
+<h3>Color Reference &mdash; SAP Fiori Horizon Token Mapping</h3>
+<table style="width:100%; border-collapse:collapse; font-size:12px; margin-top:16px;">
+  <thead><tr style="border-bottom:1px solid #222; color:#788fa6;">
+    <th style="text-align:left; padding:8px;">System Type</th>
+    <th style="text-align:left; padding:8px;">Color</th>
+    <th style="text-align:left; padding:8px;">SAP Token</th>
+    <th style="text-align:left; padding:8px;">Hex</th>
+    <th style="text-align:left; padding:8px;">Rationale</th>
+  </tr></thead>
+  <tbody>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">ABAP</td><td><span class="color-dot" style="background:#0070f2"></span>SAP Blue</td><td style="color:#555;"><code>sapBrandColor</code></td><td style="font-family:monospace;color:#666;">#0070f2</td><td style="color:#555;">SAP's primary brand color — the core ABAP platform</td></tr>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">Java</td><td><span class="color-dot" style="background:#d27700"></span>Amber</td><td style="color:#555;"><code>sapAccentColor1</code></td><td style="font-family:monospace;color:#666;">#d27700</td><td style="color:#555;">Warm amber — Java coffee association, SAP Gold-adjacent</td></tr>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">ABAP+Java</td><td><span class="color-dot" style="background:#0070f2"></span><span class="color-dot" style="background:#d27700"></span>Split</td><td style="color:#555;">brand + accent1</td><td style="font-family:monospace;color:#666;">#0070f2 / #d27700</td><td style="color:#555;">Visual dual-stack identity</td></tr>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">BusinessObjects</td><td><span class="color-dot" style="background:#8b47d7"></span>Purple</td><td style="color:#555;"><code>sapChart_OrderedColor_5</code></td><td style="font-family:monospace;color:#666;">#8b47d7</td><td style="color:#555;">BO branding uses purple tones; analytics connotation</td></tr>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">Cloud Connector</td><td><span class="color-dot" style="background:#046c7a"></span>Teal</td><td style="color:#555;"><code>sapAccentColor7</code></td><td style="font-family:monospace;color:#666;">#046c7a</td><td style="color:#555;">Connectivity/cloud — distinct from brand blue</td></tr>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">Content Server</td><td><span class="color-dot" style="background:#256f3a"></span>Green</td><td style="color:#555;"><code>sapPositiveColor</code></td><td style="font-family:monospace;color:#666;">#256f3a</td><td style="color:#555;">Documents/content — positive/archival connotation</td></tr>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">SAP Router</td><td><span class="color-dot" style="background:#788fa6"></span>Blue-grey</td><td style="color:#555;"><code>sapNeutralColor</code></td><td style="font-family:monospace;color:#666;">#788fa6</td><td style="color:#555;">Infrastructure/network — neutral, utility component</td></tr>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">MDM</td><td><span class="color-dot" style="background:#5d36ff"></span>Indigo</td><td style="color:#555;"><code>sapAccentColor5</code></td><td style="font-family:monospace;color:#666;">#5d36ff</td><td style="color:#555;">Data management — distinct, structured feel</td></tr>
+    <tr style="border-bottom:1px solid #151515;"><td style="padding:8px;">HANA</td><td><span class="color-dot" style="background:#aa0808"></span>Red</td><td style="color:#555;"><code>sapNegativeColor</code></td><td style="font-family:monospace;color:#666;">#aa0808</td><td style="color:#555;">HANA's actual brand identity is red/coral</td></tr>
+  </tbody>
+</table>
+</div>
+
+</body>
+</html>
