@@ -330,7 +330,8 @@ class SAPologyApi:
                         verbose=config.get("verbose", False),
                         url_scan=config.get("url_scan", True),
                         url_scan_threads=int(config.get("url_scan_threads", 25)),
-                        cancel_check=lambda: self.scan_cancelled)
+                        cancel_check=lambda: self.scan_cancelled,
+                        default_creds=config.get("default_creds", False))
 
                 if self.scan_cancelled:
                     print("\n[!] Scan cancelled by user")
@@ -1142,6 +1143,7 @@ GUI_HTML = r"""<!DOCTYPE html>
       <div class="toggle-row">Vulnerability Assessment <div class="toggle-switch on" id="toggle-vuln" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">URL Scanning <div class="toggle-switch on" id="toggle-url-scan" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">Client Enumeration <div class="toggle-switch on" id="toggle-client-enum" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row" title="Can lock SAP accounts">Default Credentials &#9888; <div class="toggle-switch" id="toggle-default-creds" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">Verbose Output <div class="toggle-switch" id="toggle-verbose" onclick="this.classList.toggle('on')"></div></div>
     </div>
 
@@ -1371,6 +1373,7 @@ GUI_HTML = r"""<!DOCTYPE html>
             <tr><td>HTTP verb tampering</td><td class="sev-med">--</td><td>Authentication bypass via HEAD/OPTIONS methods</td></tr>
             <tr><td>Info disclosure</td><td class="sev-low">--</td><td>/sap/public/info endpoint exposing system details</td></tr>
             <tr><td>MS internal SSL/mTLS</td><td class="sev-info">--</td><td>Secure communications detected (informational)</td></tr>
+            <tr><td>Default Credentials</td><td class="sev-crit">--</td><td>Default user/password via DIAG login (opt-in, &#9888; can lock accounts)</td></tr>
           </tbody>
         </table>
       </div>
@@ -1558,6 +1561,7 @@ function startScan() {
         vuln_assess: document.getElementById('toggle-vuln').classList.contains('on'),
         url_scan: document.getElementById('toggle-url-scan').classList.contains('on'),
         client_enum: document.getElementById('toggle-client-enum').classList.contains('on'),
+        default_creds: document.getElementById('toggle-default-creds').classList.contains('on'),
         verbose: document.getElementById('toggle-verbose').classList.contains('on'),
         btp_target: btpTarget,
         btp_keyword: btpKeyword,

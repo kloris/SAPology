@@ -137,6 +137,12 @@ try:
 except ImportError:
     HAS_CLIENT_ENUM = False
 
+try:
+    from files.sap_default_creds import check_default_credentials, FINDING_RESULTS
+    HAS_DEFAULT_CREDS = True
+except ImportError:
+    HAS_DEFAULT_CREDS = False
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SAPology Banner
@@ -5546,7 +5552,8 @@ def _get_instance_p4_ports(inst):
 
 
 def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
-                           url_scan=False, url_scan_threads=25, cancel_check=None):
+                           url_scan=False, url_scan_threads=25, cancel_check=None,
+                           default_creds=False):
     """Phase 2: Run vulnerability checks against discovered systems.
 
     cancel_check: callable returning True when scan should be aborted.
@@ -5607,6 +5614,11 @@ def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
             total_checks += len(_ssl_count_ports)
             if url_scan:
                 total_checks += len(http_ports) * ICM_PATH_COUNT
+        # Default credential check (1 step per system with dispatcher + clients)
+        if default_creds and HAS_DEFAULT_CREDS and sys_obj.clients:
+            has_dispatcher = any(inst.services.get("dispatcher") for inst in sys_obj.instances)
+            if has_dispatcher:
+                total_checks += 1
 
     has_progress = HAS_RICH
 
@@ -6127,6 +6139,52 @@ def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
                                     port=port,
                                 ))
                                 break
+
+            # Default credential check (after all instance checks for this system)
+            if default_creds and HAS_DEFAULT_CREDS and sys_obj.clients:
+                if cancelled():
+                    break
+                # Find first instance with dispatcher service
+                disp_inst = None
+                disp_port = None
+                for inst in sys_obj.instances:
+                    disp_svc = inst.services.get("dispatcher")
+                    if disp_svc:
+                        disp_inst = inst
+                        disp_port = disp_svc["port"]
+                        break
+                if disp_inst and disp_port:
+                    _print = prog.console.print if has_progress else print
+                    _print("[*] %s - Checking default credentials on %s:%d (%d clients) ..." % (
+                        sys_obj.sid, disp_inst.ip, disp_port, len(sys_obj.clients)))
+                    cred_results = check_default_credentials(
+                        disp_inst.ip, disp_port, sys_obj.clients,
+                        timeout=timeout, verbose=verbose,
+                        cancel_check=cancel_check)
+                    severity_map = {
+                        "CRITICAL": Severity.CRITICAL,
+                        "HIGH": Severity.HIGH,
+                        "MEDIUM": Severity.MEDIUM,
+                    }
+                    for cr in cred_results:
+                        disp_inst.findings.append(Finding(
+                            name="SAP Default Credentials: %s" % cr["username"],
+                            severity=severity_map.get(cr["severity"], Severity.HIGH),
+                            description="Default credentials found: user '%s' with default "
+                                        "password on client %s (%s)." % (
+                                            cr["username"], cr["client"], cr["detail"]),
+                            remediation="Change the default password immediately. Lock or "
+                                        "delete unused default accounts. See SAP Note 1570545.",
+                            detail="User: %s | Password: %s | Client: %s | Result: %s" % (
+                                cr["username"], cr["password"], cr["client"], cr["detail"]),
+                            port=disp_port,
+                        ))
+                    if cred_results:
+                        _print("[+] %s - Found %d default credential(s)" % (
+                            sys_obj.sid, len(cred_results)))
+                    elif verbose:
+                        _print("[-] %s - No default credentials found" % sys_obj.sid)
+                    step()
 
     if not has_progress and _vuln_done[0] > 0:
         sys.stdout.write("\r" + " " * 50 + "\r")
@@ -6878,6 +6936,7 @@ vulnerability checks (on-premises):
   HTTP verb tampering        --           Authentication bypass via HEAD/OPTIONS
   Info disclosure            --           /sap/public/info exposing system details
   MS internal SSL/mTLS       --           Secure communications detected (INFO)
+  Default Credentials        --           Default user/password via DIAG (opt-in)
 
 vulnerability checks (BTP cloud):
   Check ID       Severity   Description
@@ -6973,6 +7032,9 @@ examples:
                         help="Command for gateway SAPXPG test (default: whoami)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Verbose output")
+    parser.add_argument("--default-creds", action="store_true",
+                        help="Check default SAP user/password combinations via DIAG "
+                             "(WARNING: can lock accounts)")
     parser.add_argument("--hail-mary", action="store_true",
                         help="Scan ALL RFC 1918 private subnets (~17.9M IPs) for SAP systems. "
                              "Uses two-phase async discovery: Phase 1 probes 8 sample IPs per "
@@ -7114,7 +7176,8 @@ examples:
             print("=" * 60)
             landscape = assess_vulnerabilities(landscape, args.gw_test_cmd, args.timeout + 2, args.verbose,
                                                 url_scan=not args.skip_url_scan,
-                                                url_scan_threads=args.url_scan_threads)
+                                                url_scan_threads=args.url_scan_threads,
+                                                default_creds=args.default_creds)
         elif args.skip_vuln:
             print("\n[*] Skipping vulnerability checks (--skip-vuln)")
     else:
