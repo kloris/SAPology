@@ -1709,6 +1709,7 @@ function renderSystems(systems) {
         var ip = (sys.instances && sys.instances[0]) ? sys.instances[0].ip : '';
         var meta = ip;
         if (sys.kernel) meta += ' \u00b7 Kernel ' + sys.kernel;
+        if (sys.os_type) meta += ' \u00b7 ' + sys.os_type;
         meta += ' \u00b7 ' + portCount + ' ports';
 
         var badges = '';
@@ -1959,6 +1960,9 @@ function showSystemModal(idx) {
         '<div class="info-item"><span class="ik">IP Address</span><span class="iv">' + esc(ip) + '</span></div>' +
         '<div class="info-item"><span class="ik">System Type</span><span class="iv">' + esc(sys.system_type || 'Unknown') + '</span></div>' +
         '<div class="info-item"><span class="ik">Kernel</span><span class="iv">' + esc(sys.kernel || 'N/A') + '</span></div>' +
+        (sys.os_type ? '<div class="info-item"><span class="ik">OS</span><span class="iv">' + esc(sys.os_type) + '</span></div>' : '') +
+        (sys.sap_release ? '<div class="info-item"><span class="ik">SAP Release</span><span class="iv">' + esc(sys.sap_release) + '</span></div>' : '') +
+        (sys.db_type ? '<div class="info-item"><span class="ik">Database</span><span class="iv">' + esc(sys.db_type) + '</span></div>' : '') +
         '</div>';
 
     var ports = '<ul class="modal-ports">';

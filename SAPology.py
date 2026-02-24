@@ -125,6 +125,12 @@ try:
 except ImportError:
     HAS_RICH = False
 
+try:
+    from files.sap_rfc_system_info import probe_sap_system
+    HAS_RFC_SYSINFO = True
+except ImportError:
+    HAS_RFC_SYSINFO = False
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SAPology Banner
@@ -593,6 +599,9 @@ class SAPSystem:
     hostname: str = ""
     kernel: str = ""
     system_type: str = ""
+    os_type: str = ""
+    sap_release: str = ""
+    db_type: str = ""
     relationships: List[dict] = field(default_factory=list)
 
     def highest_severity(self) -> Optional[Severity]:
@@ -615,6 +624,9 @@ class SAPSystem:
             "hostname": self.hostname,
             "kernel": self.kernel,
             "system_type": self.system_type,
+            "os_type": self.os_type,
+            "sap_release": self.sap_release,
+            "db_type": self.db_type,
             "instances": [i.to_dict() for i in self.instances],
             "relationships": self.relationships,
         }
@@ -3818,8 +3830,8 @@ def generate_svg_topology(landscape):
 
     # Calculate box height based on max instances across systems
     max_insts = max(len(s.instances) for s in systems)
-    # Header(30) + instances label(20) + per-instance(16*N) + hostname/kernel(40) + padding(10)
-    box_h = 30 + 20 + max(max_insts, 1) * 16 + 40 + 10
+    # Header(30) + instances label(20) + per-instance(16*N) + context lines(56) + padding(10)
+    box_h = 30 + 20 + max(max_insts, 1) * 16 + 56 + 10
     box_h = max(box_h, 160)
 
     svg_w = cols * (box_w + margin_x) + margin_x
@@ -3896,15 +3908,22 @@ def generate_svg_topology(landscape):
                          % (x + 10, text_y, html.escape(full_label), html.escape(label)))
             text_y += 16
 
-        # Hostname / kernel
+        # Context lines (hostname, OS, kernel) at bottom of box
+        ctx_y = y + box_h - 46
         if sys_obj.hostname:
             lines.append('<text x="%d" y="%d" fill="#7f8c8d" font-size="10" '
                          'font-family="monospace">Host: %s</text>'
-                         % (x + 10, y + box_h - 30, html.escape(sys_obj.hostname)))
+                         % (x + 10, ctx_y, html.escape(sys_obj.hostname)))
+            ctx_y += 16
+        if sys_obj.os_type:
+            lines.append('<text x="%d" y="%d" fill="#7f8c8d" font-size="10" '
+                         'font-family="monospace">OS: %s</text>'
+                         % (x + 10, ctx_y, html.escape(sys_obj.os_type)))
+            ctx_y += 16
         if sys_obj.kernel:
             lines.append('<text x="%d" y="%d" fill="#7f8c8d" font-size="10" '
                          'font-family="monospace">Kernel: %s</text>'
-                         % (x + 10, y + box_h - 14, html.escape(sys_obj.kernel)))
+                         % (x + 10, ctx_y, html.escape(sys_obj.kernel)))
 
         # Finding count
         fc = len(sys_obj.all_findings())
@@ -4031,10 +4050,23 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
                 finding_count,
             )
 
+        meta_parts = [
+            "Hostname: %s" % html.escape(sys_obj.hostname or "N/A"),
+            "Kernel: %s" % html.escape(sys_obj.kernel or "N/A"),
+        ]
+        if sys_obj.os_type:
+            meta_parts.append("OS: %s" % html.escape(sys_obj.os_type))
+        if sys_obj.sap_release:
+            meta_parts.append("SAP Release: %s" % html.escape(sys_obj.sap_release))
+        if sys_obj.db_type:
+            meta_parts.append("DB: %s" % html.escape(sys_obj.db_type))
+        meta_parts.append("Instances: %d" % len(sys_obj.instances))
+        meta_str = " | ".join(meta_parts)
+
         system_details += """
         <div class="system-card" style="border-left: 4px solid %s">
           <h3>%s %s</h3>
-          <p class="system-meta">Hostname: %s | Kernel: %s | Instances: %d</p>
+          <p class="system-meta">%s</p>
           <table>
             <thead>
               <tr><th>Instance</th><th>IP</th><th>Host</th><th>Open Ports</th><th>Info</th><th>Findings</th></tr>
@@ -4046,9 +4078,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
             border_color,
             html.escape(sys_obj.sid),
             ("(%s)" % html.escape(sys_obj.hostname)) if sys_obj.hostname else "",
-            html.escape(sys_obj.hostname or "N/A"),
-            html.escape(sys_obj.kernel or "N/A"),
-            len(sys_obj.instances),
+            meta_str,
             inst_rows,
         )
 
@@ -4455,6 +4485,8 @@ def print_terminal_summary(landscape):
         sys_table.add_column("SID", style="cyan", width=10)
         sys_table.add_column("Hostname", style="white")
         sys_table.add_column("Kernel", style="dim")
+        sys_table.add_column("OS", style="dim")
+        sys_table.add_column("DB", style="dim")
         sys_table.add_column("Instances", style="green")
         sys_table.add_column("Open Ports", style="yellow")
         sys_table.add_column("Findings", style="red")
@@ -4475,6 +4507,8 @@ def print_terminal_summary(landscape):
                 sys_obj.sid,
                 sys_obj.hostname or "N/A",
                 sys_obj.kernel or "N/A",
+                sys_obj.os_type or "",
+                sys_obj.db_type or "",
                 str(len(sys_obj.instances)),
                 ", ".join(str(p) for p in sorted(ports_all)),
                 finding_str,
@@ -4564,8 +4598,14 @@ def print_terminal_summary(landscape):
             ports_all = set()
             for inst in sys_obj.instances:
                 ports_all.update(inst.ports.keys())
-            print("  SID: %-10s Host: %-20s Kernel: %-8s Ports: %s  Findings: %d" % (
+            extra = ""
+            if sys_obj.os_type:
+                extra += "  OS: %s" % sys_obj.os_type
+            if sys_obj.db_type:
+                extra += "  DB: %s" % sys_obj.db_type
+            print("  SID: %-10s Host: %-20s Kernel: %-8s%s  Ports: %s  Findings: %d" % (
                 sys_obj.sid, sys_obj.hostname or "N/A", sys_obj.kernel or "N/A",
+                extra,
                 ",".join(str(p) for p in sorted(ports_all)),
                 len(sys_obj.all_findings()),
             ))
@@ -5025,6 +5065,16 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                         kernrl = pub_info.get("RFCKERNRL", "")
                         if kernrl and not sys_obj.kernel:
                             sys_obj.kernel = kernrl.strip()
+                        # Extract OS, SAP release, DB type
+                        opsys = pub_info.get("RFCOPSYS", "")
+                        if opsys and not sys_obj.os_type:
+                            sys_obj.os_type = opsys.strip()
+                        saprl = pub_info.get("RFCSAPRL", "")
+                        if saprl and not sys_obj.sap_release:
+                            sys_obj.sap_release = saprl.strip()
+                        dbsys = pub_info.get("RFCDBSYS", "")
+                        if dbsys and not sys_obj.db_type:
+                            sys_obj.db_type = dbsys.strip()
                         # Track the working scheme for ICM
                         if pub_info.get("scheme") == "https" and not use_ssl:
                             use_ssl = True  # Remember this port needs HTTPS
@@ -5077,6 +5127,57 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     gw_info = fingerprint_gateway(target_ip, port, timeout)
                     if gw_info.get("accessible"):
                         instance.services["gateway"] = {"port": port}
+
+                    # RFC_SYSTEM_INFO probe — runs on any open 33XX port
+                    # (does not require the v3 NOOP monitor to succeed)
+                    if HAS_RFC_SYSINFO:
+                        log_verbose("  Probing RFC_SYSTEM_INFO on %s:%d ..." % (target_ip, port))
+                        try:
+                            rfc = probe_sap_system(target_ip, port, timeout=max(timeout, 5))
+                            if rfc.get("status") in ("rfc_success", "info_extracted", "partial_info"):
+                                if not gw_info.get("accessible"):
+                                    instance.services["gateway"] = {"port": port}
+                                for key in ("RFCOPSYS", "RFCSAPRL", "RFCDBSYS", "RFCDBHOST",
+                                            "RFCKERNRL", "RFCHOST2", "RFCSYSID", "RFCIPADDR"):
+                                    val = rfc.get(key, "").strip()
+                                    if val:
+                                        instance.info["rfc_%s" % key] = val
+                                rfc_kernel = rfc.get("RFCKERNRL", "").strip()
+                                if rfc_kernel and not sys_obj.kernel:
+                                    sys_obj.kernel = rfc_kernel
+                                rfc_host = (rfc.get("RFCHOST2", "").strip()
+                                            or rfc.get("RFCHOST", "").strip())
+                                if rfc_host and not sys_obj.hostname:
+                                    sys_obj.hostname = rfc_host
+                                rfc_os = rfc.get("RFCOPSYS", "").strip()
+                                if rfc_os and not sys_obj.os_type:
+                                    sys_obj.os_type = rfc_os
+                                rfc_saprl = rfc.get("RFCSAPRL", "").strip()
+                                if rfc_saprl and not sys_obj.sap_release:
+                                    sys_obj.sap_release = rfc_saprl
+                                rfc_dbsys = rfc.get("RFCDBSYS", "").strip()
+                                if rfc_dbsys and not sys_obj.db_type:
+                                    sys_obj.db_type = rfc_dbsys
+                                rfc_sid = rfc.get("RFCSYSID", "").strip()
+                                if rfc_sid and len(rfc_sid) == 3 and not sid_found:
+                                    sys_obj.sid = rfc_sid
+                                    sid_found = True
+                                # Fallback from gateway error parsing (partial info)
+                                if not sys_obj.hostname and rfc.get("hostname"):
+                                    sys_obj.hostname = rfc["hostname"]
+                                if not sys_obj.kernel and rfc.get("kernel_release"):
+                                    sys_obj.kernel = rfc["kernel_release"]
+                                if not sys_obj.os_type and rfc.get("os_hint"):
+                                    sys_obj.os_type = rfc["os_hint"]
+                                if not sys_obj.sap_release and rfc.get("sap_release_approx"):
+                                    sys_obj.sap_release = rfc["sap_release_approx"]
+                                if not sid_found and rfc.get("sap_sid"):
+                                    sid_val = rfc["sap_sid"].strip()
+                                    if len(sid_val) == 3:
+                                        sys_obj.sid = sid_val
+                                        sid_found = True
+                        except Exception:
+                            pass
 
                 # Message Server Internal
                 elif "Message Server Internal" in svc_desc:
