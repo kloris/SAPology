@@ -22,6 +22,9 @@ SAPology is an **SAP security testing tool** for discovering, fingerprinting, an
 - **Two-phase discovery** - Quick pre-scan identifies SAP hosts, full scan enumerates all services
 - **Protocol fingerprinting** - Native parsing of SAP DIAG, RFC, Gateway, Message Server, ICM, P4, and SAP Router protocols
 - **SAPControl interrogation** - Extracts SID, kernel version, instance details, and system topology via SOAP
+- **RFC system enrichment** - Unauthenticated RFC_SYSTEM_INFO probing to extract OS, database type, SAP release, hostname, and kernel version from ABAP systems
+- **Client enumeration** - DIAG-based enumeration of SAP clients (000-999) with automatic client redirection detection for S/4HANA systems
+- **Default credential check** - Opt-in testing of 16 well-known SAP default user/password combinations via DIAG login, with stop-on-lock protection to minimize account lockout risk
 - **System type detection** - Identifies ABAP, Java, ABAP+Java, BusinessObjects, Cloud Connector, Content Server, SAP Router, MDM, and HANA systems
 - **Vulnerability assessment** - Checks for 15+ CVEs and misconfigurations including unprotected gateways (SAPXPG), open Message Server ports, HTTP smuggling, exposed admin consoles, SSL/TLS weaknesses, and HTTP verb tampering
 - **ICM URL scanning** - Tests 1,600+ SAP-specific URL paths per HTTP port for exposed endpoints
@@ -51,6 +54,9 @@ python3 SAPology.py -T targets.txt --json results.json
 # Skip vulnerability checks (discovery only)
 python3 SAPology.py -t 192.168.1.100 --skip-vuln
 
+# Check for default SAP credentials (opt-in, can lock accounts!)
+python3 SAPology.py -t 192.168.1.100 --default-creds
+
 # Hail Mary - scan all private subnets
 python3 SAPology.py --hail-mary
 ```
@@ -76,6 +82,23 @@ python3 SAPology_btp.py -d mycompany -o btp_report.html
 
 # Combined on-prem + BTP scan
 python3 SAPology.py -t 10.0.0.0/24 --btp-discover mycompany
+```
+
+### Standalone Tools
+
+The `files/` directory contains standalone modules that can also be used independently:
+
+```bash
+# Enumerate SAP clients (000-999) via DIAG protocol
+python3 files/sap_client_enum.py -t 192.168.1.100:3200
+python3 files/sap_client_enum.py -t 192.168.1.100:3200 --range 0-100 -v
+
+# Check default SAP credentials via DIAG login
+python3 files/sap_default_creds.py -t 192.168.1.100:3200 -c 000,001,066
+python3 files/sap_default_creds.py -t 192.168.1.100:3200 -c 000,001 -v
+
+# Probe RFC_SYSTEM_INFO (unauthenticated system info retrieval)
+python3 files/sap_rfc_system_info.py -t 192.168.1.100 -p 3300 -v
 ```
 
 ### Desktop GUI
@@ -170,8 +193,8 @@ usage: SAPology.py [-h] [--target TARGET] [--target-file TARGET_FILE]
                    [--threads THREADS] [--output OUTPUT] [--json JSON_OUTPUT]
                    [--skip-vuln] [--skip-url-scan]
                    [--url-scan-threads URL_SCAN_THREADS]
-                   [--gw-test-cmd GW_TEST_CMD] [-v] [--hail-mary]
-                   [--hm-offsets HM_OFFSETS]
+                   [--gw-test-cmd GW_TEST_CMD] [-v] [--default-creds]
+                   [--hail-mary] [--hm-offsets HM_OFFSETS]
 ```
 
 | Flag | Description |
@@ -188,6 +211,7 @@ usage: SAPology.py [-h] [--target TARGET] [--target-file TARGET_FILE]
 | `--url-scan-threads` | Threads for URL scanning (default: `25`) |
 | `--gw-test-cmd` | OS command for gateway SAPXPG test (default: `id`) |
 | `-v`, `--verbose` | Verbose output |
+| `--default-creds` | Check default SAP user/password combinations via DIAG (opt-in, can lock accounts) |
 | `--hail-mary` | Scan all RFC 1918 private subnets |
 | `--hm-offsets` | Custom host offsets for hail-mary subnet sampling |
 
@@ -286,6 +310,7 @@ SAPology tests for the following CVEs and misconfigurations during Phase 2 asses
 | SSL/TLS weaknesses | -- | SSLv3, TLS 1.0/1.1, self-signed certificates |
 | HTTP verb tampering | -- | Authentication bypass via HEAD/OPTIONS methods |
 | Info disclosure | -- | /sap/public/info endpoint exposing system details |
+| Default Credentials | -- | Default SAP user/password via DIAG login (opt-in, `--default-creds`) |
 
 ## BTP Vulnerability Checks
 
