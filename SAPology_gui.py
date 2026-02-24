@@ -779,23 +779,13 @@ GUI_HTML = r"""<!DOCTYPE html>
     gap: 12px;
   }
   .sys-row:hover { background: var(--bg-hover); }
-  .sys-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 700;
-    color: white;
-    flex-shrink: 0;
+  .sys-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 24px; padding: 0 8px; border-radius: 12px;
+    font-size: 10px; font-weight: 700; color: white;
+    white-space: nowrap; flex-shrink: 0;
   }
-  .sys-icon.abap { background: linear-gradient(135deg, #1a6dff 0%, #0050cc 100%); }
-  .sys-icon.java { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); }
-  .sys-icon.mdm { background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%); }
-  .sys-icon.unknown { background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); }
-  .sys-icon.btp { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }
+  .sys-pill svg { width: 12px; height: 12px; }
 
   .sys-info { flex: 1; min-width: 0; }
   .sys-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1686,6 +1676,28 @@ function renderDashboard(data) {
     renderBtpView(data.btp_endpoints || [], data.btp_summary || null);
 }
 
+function sysTypePill(t) {
+    t = (t || '').toUpperCase();
+    var m = {
+        'ABAP':            {c:'#0070f2', l:'ABAP',    s:'<text x="6" y="9" font-size="9" font-weight="bold" fill="white" text-anchor="middle" font-family="monospace">{}</text>'},
+        'JAVA':            {c:'#d27700', l:'Java',    s:'<circle cx="6" cy="6" r="4" fill="white"/>'},
+        'ABAP+JAVA':       {c:'#0070f2', l:'AB+Java', s:'<text x="6" y="9" font-size="9" font-weight="bold" fill="white" text-anchor="middle" font-family="monospace">{}</text>'},
+        'BUSINESSOBJECTS': {c:'#8b47d7', l:'BO',      s:'<rect x="1" y="6" width="3" height="6" fill="white"/><rect x="5" y="3" width="3" height="9" fill="white"/><rect x="9" y="1" width="3" height="11" fill="white"/>'},
+        'CLOUD_CONNECTOR':  {c:'#046c7a', l:'SCC',    s:'<path d="M3,8 A3,3 0 1,1 9,8 A2,2 0 1,1 11,6" fill="none" stroke="white" stroke-width="1.5"/>'},
+        'CONTENT_SERVER':  {c:'#256f3a', l:'Content', s:'<rect x="2" y="1" width="8" height="10" rx="1" fill="none" stroke="white" stroke-width="1.2"/><line x1="4" y1="4" x2="8" y2="4" stroke="white" stroke-width="1"/><line x1="4" y1="6" x2="8" y2="6" stroke="white" stroke-width="1"/>'},
+        'SAPROUTER':       {c:'#788fa6', l:'Router',  s:'<path d="M2,6 L6,2 L10,6 L6,10 Z" fill="none" stroke="white" stroke-width="1.3"/>'},
+        'MDM':             {c:'#5d36ff', l:'MDM',     s:'<rect x="1" y="1" width="4" height="4" rx="0.5" fill="white"/><rect x="7" y="1" width="4" height="4" rx="0.5" fill="white"/><rect x="1" y="7" width="4" height="4" rx="0.5" fill="white"/><rect x="7" y="7" width="4" height="4" rx="0.5" fill="white"/>'},
+        'HANA':            {c:'#aa0808', l:'HANA',    s:'<rect x="1" y="5" width="2" height="7" fill="white"/><rect x="5" y="2" width="2" height="10" fill="white"/><rect x="9" y="0" width="2" height="12" fill="white"/>'}
+    };
+    if (t === 'ABAP+JAVA') {
+        return '<span class="sys-pill" style="background:linear-gradient(90deg,#0070f2 50%,#d27700 50%)">' +
+            '<svg viewBox="0 0 12 12" width="12" height="12">' + m[t].s + '</svg>' + m[t].l + '</span>';
+    }
+    var o = m[t] || {c:'#788fa6', l:'SAP', s:''};
+    var svgPart = o.s ? '<svg viewBox="0 0 12 12" width="12" height="12">' + o.s + '</svg>' : '';
+    return '<span class="sys-pill" style="background:' + o.c + '">' + svgPart + o.l + '</span>';
+}
+
 function renderSystems(systems) {
     var container = document.getElementById('systems-list');
     var badge = document.getElementById('systems-badge');
@@ -1698,10 +1710,6 @@ function renderSystems(systems) {
 
     var html = '';
     systems.forEach(function(sys, idx) {
-        var t = (sys.system_type || '').toUpperCase();
-        var iconClass = t.indexOf('JAVA') >= 0 ? 'java' : t === 'MDM' ? 'mdm' : t.indexOf('ABAP') >= 0 ? 'abap' : 'unknown';
-        var iconLabel = t || 'SAP';
-
         var portCount = 0;
         var allF = [];
         (sys.instances || []).forEach(function(inst) {
@@ -1725,7 +1733,7 @@ function renderSystems(systems) {
         if (med > 0) badges += '<span class="mini-badge mb-medium">' + med + '</span>';
 
         html += '<div class="sys-row" onclick="showSystemModal(' + idx + ')">' +
-            '<div class="sys-icon ' + iconClass + '">' + esc(iconLabel) + '</div>' +
+            sysTypePill(sys.system_type) +
             '<div class="sys-info">' +
                 '<div class="sys-name">' + esc(sys.sid) + ' &mdash; ' + esc(sys.hostname || ip) + '</div>' +
                 '<div class="sys-meta">' + esc(meta) + '</div>' +
@@ -2056,8 +2064,7 @@ function showSystemModal(idx) {
     }
 
     document.getElementById('modal-title').innerHTML =
-        '<div class="sys-icon ' + iconClass + '" style="width:32px;height:32px;font-size:10px;">' +
-        esc(t || 'SAP') + '</div> ' + esc(sys.sid) + ' &mdash; ' + esc(sys.hostname || ip);
+        sysTypePill(sys.system_type) + ' ' + esc(sys.sid) + ' &mdash; ' + esc(sys.hostname || ip);
     document.getElementById('modal-body').innerHTML =
         '<div class="modal-section"><h4>System Information</h4>' + info + '</div>' +
         '<div class="modal-section"><h4>Open Ports</h4>' + ports + '</div>' +
@@ -2195,7 +2202,7 @@ function renderBtpView(btpEndpoints, btpSummary) {
             if (ep.status_code) meta += ' \u00b7 HTTP ' + ep.status_code;
 
             html += '<div class="sys-row" onclick="showBtpEndpointModal(' + idx + ')">' +
-                '<div class="sys-icon btp">' + esc(svcLabel) + '</div>' +
+                '<span class="sys-pill" style="background:#046c7a">' + esc(svcLabel) + '</span>' +
                 '<div class="sys-info">' +
                     '<div class="sys-name">' + esc(ep.hostname) + '</div>' +
                     '<div class="sys-meta">' + esc(meta) + '</div>' +
@@ -2294,7 +2301,7 @@ function showBtpEndpointModal(idx) {
     });
 
     document.getElementById('modal-title').innerHTML =
-        '<div class="sys-icon btp" style="width:32px;height:32px;font-size:9px;">BTP</div> ' + esc(ep.hostname);
+        '<span class="sys-pill" style="background:#046c7a">BTP</span> ' + esc(ep.hostname);
     document.getElementById('modal-body').innerHTML =
         '<div class="modal-section"><h4>Endpoint Information</h4>' + info + '</div>' +
         techHtml + sshHtml +

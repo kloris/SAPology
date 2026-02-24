@@ -3835,6 +3835,75 @@ def check_cve_2022_41272(host, port, timeout=5):
 # SECTION 7: Report Generation
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _system_type_pill_html(system_type):
+    """Return inline HTML pill badge for a system type (SAP Fiori Horizon colors)."""
+    t = (system_type or "").upper()
+    _MAP = {
+        "ABAP":            ("#0070f2", "ABAP",    '<text x="6" y="9" font-size="9" font-weight="bold" fill="white" text-anchor="middle" font-family="monospace">{}</text>'),
+        "JAVA":            ("#d27700", "Java",     '<circle cx="6" cy="6" r="4" fill="white"/>'),
+        "ABAP+JAVA":       ("#0070f2", "AB+Java",  '<text x="6" y="9" font-size="9" font-weight="bold" fill="white" text-anchor="middle" font-family="monospace">{}</text>'),
+        "BUSINESSOBJECTS": ("#8b47d7", "BO",       '<rect x="1" y="6" width="3" height="6" fill="white"/><rect x="5" y="3" width="3" height="9" fill="white"/><rect x="9" y="1" width="3" height="11" fill="white"/>'),
+        "CLOUD_CONNECTOR":  ("#046c7a", "SCC",     '<path d="M3,8 A3,3 0 1,1 9,8 A2,2 0 1,1 11,6" fill="none" stroke="white" stroke-width="1.5"/>'),
+        "CONTENT_SERVER":  ("#256f3a", "Content",  '<rect x="2" y="1" width="8" height="10" rx="1" fill="none" stroke="white" stroke-width="1.2"/><line x1="4" y1="4" x2="8" y2="4" stroke="white" stroke-width="1"/><line x1="4" y1="6" x2="8" y2="6" stroke="white" stroke-width="1"/>'),
+        "SAPROUTER":       ("#788fa6", "Router",   '<path d="M2,6 L6,2 L10,6 L6,10 Z" fill="none" stroke="white" stroke-width="1.3"/>'),
+        "MDM":             ("#5d36ff", "MDM",      '<rect x="1" y="1" width="4" height="4" rx="0.5" fill="white"/><rect x="7" y="1" width="4" height="4" rx="0.5" fill="white"/><rect x="1" y="7" width="4" height="4" rx="0.5" fill="white"/><rect x="7" y="7" width="4" height="4" rx="0.5" fill="white"/>'),
+        "HANA":            ("#aa0808", "HANA",     '<rect x="1" y="5" width="2" height="7" fill="white"/><rect x="5" y="2" width="2" height="10" fill="white"/><rect x="9" y="0" width="2" height="12" fill="white"/>'),
+    }
+    if t == "ABAP+JAVA":
+        color, label, svg = _MAP[t]
+        bg = "linear-gradient(90deg,#0070f2 50%,#d27700 50%)"
+    elif t in _MAP:
+        color, label, svg = _MAP[t]
+        bg = color
+    else:
+        color, label, svg, bg = "#788fa6", "SAP", "", "#788fa6"
+    svg_el = ('<svg viewBox="0 0 12 12" width="12" height="12" '
+              'style="vertical-align:middle">%s</svg>' % svg) if svg else ""
+    return ('<span class="sys-pill" style="background:%s">'
+            '%s%s</span>' % (bg, svg_el, html.escape(label)))
+
+
+def _system_type_pill_svg(system_type, x, y):
+    """Return SVG elements for a Style G pill badge at position (x, y)."""
+    t = (system_type or "").upper()
+    # (fill_color, label, width)
+    _MAP = {
+        "ABAP":            ("#0070f2", "ABAP", 52),
+        "JAVA":            ("#d27700", "Java", 50),
+        "ABAP+JAVA":       (None, "AB+Java", 78),
+        "BUSINESSOBJECTS": ("#8b47d7", "BO", 38),
+        "CLOUD_CONNECTOR": ("#046c7a", "SCC", 44),
+        "CONTENT_SERVER":  ("#256f3a", "Content", 62),
+        "SAPROUTER":       ("#788fa6", "Router", 56),
+        "MDM":             ("#5d36ff", "MDM", 44),
+        "HANA":            ("#aa0808", "HANA", 52),
+    }
+    if t not in _MAP:
+        if not t:
+            return ("", 0)
+        color, label, w = "#788fa6", t[:6], min(len(t[:6]) * 8 + 16, 70)
+    elif t == "ABAP+JAVA":
+        _, label, w = _MAP[t]
+        hw = w // 2
+        svg = ('<rect x="%d" y="%d" width="%d" height="20" rx="10" fill="#0070f2"/>'
+               '<rect x="%d" y="%d" width="%d" height="20" rx="10" fill="#d27700"/>'
+               '<rect x="%d" y="%d" width="4" height="20" fill="#0070f2"/>'
+               '<text x="%d" y="%d" text-anchor="middle" font-size="9" '
+               'font-weight="bold" fill="white" font-family="sans-serif">%s</text>'
+               % (x, y, hw + 2,
+                  x + hw - 2, y, hw + 2,
+                  x + hw - 2, y,
+                  x + w // 2, y + 14, html.escape(label)))
+        return (svg, w)
+    else:
+        color, label, w = _MAP[t]
+    svg = ('<rect x="%d" y="%d" width="%d" height="20" rx="10" fill="%s"/>'
+           '<text x="%d" y="%d" text-anchor="middle" font-size="10" '
+           'font-weight="bold" fill="white" font-family="sans-serif">%s</text>'
+           % (x, y, w, color, x + w // 2, y + 14, html.escape(label)))
+    return (svg, w)
+
+
 def generate_svg_topology(landscape):
     """Generate an SVG network topology diagram."""
     systems = landscape
@@ -3885,20 +3954,28 @@ def generate_svg_topology(landscape):
                      'rx="6" fill="%s" stroke="%s" stroke-width="2"/>'
                      % (x, y, box_w, box_h, fill, border_color))
 
-        # SID header
+        # SID header with pill badge
         inst_nrs = sorted(set(i.instance_nr for i in sys_obj.instances if i.instance_nr != "XX"))
-        header_parts = [sys_obj.sid]
-        if sys_obj.system_type:
-            header_parts.append(sys_obj.system_type)
-        if inst_nrs:
-            header_parts.append("[%s]" % ",".join(inst_nrs))
-        header_text = "  ".join(header_parts)
         lines.append('<rect x="%d" y="%d" width="%d" height="30" '
                      'rx="6" fill="%s" opacity="0.3"/>'
                      % (x, y, box_w, color))
+
+        # SID text (left-aligned)
         lines.append('<text x="%d" y="%d" fill="white" font-size="14" '
-                     'font-family="monospace" font-weight="bold" text-anchor="middle">%s</text>'
-                     % (x + box_w // 2, y + 20, html.escape(header_text)))
+                     'font-family="monospace" font-weight="bold">%s</text>'
+                     % (x + 10, y + 20, html.escape(sys_obj.sid)))
+
+        # System type pill badge (after SID)
+        pill_x = x + 10 + len(sys_obj.sid) * 9 + 8
+        pill_svg, pill_w = _system_type_pill_svg(sys_obj.system_type, pill_x, y + 5)
+        if pill_svg:
+            lines.append(pill_svg)
+
+        # Instance numbers (right-aligned)
+        if inst_nrs:
+            lines.append('<text x="%d" y="%d" fill="#b0b0b0" font-size="12" '
+                         'font-family="monospace" text-anchor="end">[%s]</text>'
+                         % (x + box_w - 10, y + 20, html.escape(",".join(inst_nrs))))
 
         # Instance details with tooltips
         text_y = y + 50
@@ -4092,9 +4169,11 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         meta_parts.append("Instances: %d" % len(sys_obj.instances))
         meta_str = " | ".join(meta_parts)
 
+        type_pill = _system_type_pill_html(sys_obj.system_type)
+
         system_details += """
         <div class="system-card" style="border-left: 4px solid %s">
-          <h3>%s %s</h3>
+          <h3>%s %s %s</h3>
           <p class="system-meta">%s</p>
           <table>
             <thead>
@@ -4105,6 +4184,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         </div>
         """ % (
             border_color,
+            type_pill,
             html.escape(sys_obj.sid),
             ("(%s)" % html.escape(sys_obj.hostname)) if sys_obj.hostname else "",
             meta_str,
@@ -4312,6 +4392,12 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
                     text-align: center; }
   .system-card { background: var(--card-bg); border-radius: 8px; padding: 20px;
                  margin: 15px 0; border: 1px solid var(--border); }
+  .system-card h3 { display: flex; align-items: center; gap: 10px; }
+  .sys-pill { display: inline-flex; align-items: center; gap: 4px;
+              height: 22px; padding: 0 8px; border-radius: 11px;
+              font-size: 10px; font-weight: 700; color: white;
+              white-space: nowrap; }
+  .sys-pill svg { width: 12px; height: 12px; }
   .system-meta { color: var(--text-dim); font-size: 13px; margin-bottom: 15px; }
   .detail-cell { max-width: 400px; word-wrap: break-word; font-size: 12px; }
   .metadata { background: var(--card-bg); border-radius: 8px; padding: 20px;
