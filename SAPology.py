@@ -3916,8 +3916,8 @@ def generate_svg_topology(landscape):
                          % (x + 10, text_y, html.escape(full_label), html.escape(label)))
             text_y += 16
 
-        # Context lines (hostname, OS, kernel) at bottom of box
-        ctx_y = y + box_h - 46
+        # Context lines (hostname, OS, kernel, clients) at bottom of box
+        ctx_y = y + box_h - 62
         if sys_obj.hostname:
             lines.append('<text x="%d" y="%d" fill="#7f8c8d" font-size="10" '
                          'font-family="monospace">Host: %s</text>'
