@@ -779,23 +779,8 @@ GUI_HTML = r"""<!DOCTYPE html>
     gap: 12px;
   }
   .sys-row:hover { background: var(--bg-hover); }
-  .sys-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 700;
-    color: white;
-    flex-shrink: 0;
-  }
-  .sys-icon.abap { background: linear-gradient(135deg, #1a6dff 0%, #0050cc 100%); }
-  .sys-icon.java { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); }
-  .sys-icon.mdm { background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%); }
-  .sys-icon.unknown { background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); }
-  .sys-icon.btp { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }
+  .sys-icon-h { flex-shrink: 0; width: 28px; height: 28px; }
+  .sys-icon-h svg { width: 28px; height: 28px; }
 
   .sys-info { flex: 1; min-width: 0; }
   .sys-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1686,6 +1671,41 @@ function renderDashboard(data) {
     renderBtpView(data.btp_endpoints || [], data.btp_summary || null);
 }
 
+var _sysIconCounter = 0;
+function sysTypeIcon(t) {
+    t = (t || '').toUpperCase();
+    var id = 'sh' + (++_sysIconCounter);
+    var f = '<defs><filter id="' + id + '"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+    var m = {
+        'ABAP': {c:'#0070f2',
+            s:'<circle cx="24" cy="24" r="20" fill="#0070f2" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#0070f2" stroke-width="1.5" filter="url(#FID)"/><path d="M17 14 Q14 14 14 17 L14 21 Q14 24 12 24 Q14 24 14 27 L14 31 Q14 34 17 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M31 14 Q34 14 34 17 L34 21 Q34 24 36 24 Q34 24 34 27 L34 31 Q34 34 31 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="24" r="1.5" fill="#0070f2"/>'},
+        'JAVA': {c:'#d27700',
+            s:'<circle cx="24" cy="24" r="20" fill="#d27700" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#d27700" stroke-width="1.5" filter="url(#FID)"/><rect x="15" y="19" width="14" height="14" rx="3" fill="none" stroke="#d27700" stroke-width="1.8"/><path d="M29 23 Q34 23 34 27 Q34 31 29 31" fill="none" stroke="#d27700" stroke-width="1.5"/><path d="M19 17 C19 14 20.5 14 20.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/><path d="M24 17 C24 14 25.5 14 25.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/><line x1="14" y1="35" x2="30" y2="35" stroke="#d27700" stroke-width="1.8" stroke-linecap="round"/>'},
+        'ABAP+JAVA': {c:'#0070f2',
+            s:'<circle cx="24" cy="24" r="20" fill="none" stroke="url(#FIDg)" stroke-width="1.5" filter="url(#FID)"/><path d="M14 17 Q12 17 12 19 L12 22 Q12 24 10 24 Q12 24 12 26 L12 29 Q12 31 14 31" fill="none" stroke="#0070f2" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="29" y="20" width="8" height="8" rx="2" fill="none" stroke="#d27700" stroke-width="1.5"/><path d="M37 23 Q39.5 23 39.5 25 Q39.5 27 37 27" fill="none" stroke="#d27700" stroke-width="1.2"/><line x1="28" y1="30" x2="38" y2="30" stroke="#d27700" stroke-width="1.5" stroke-linecap="round"/>'},
+        'BUSINESSOBJECTS': {c:'#8b47d7',
+            s:'<circle cx="24" cy="24" r="20" fill="#8b47d7" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#8b47d7" stroke-width="1.5" filter="url(#FID)"/><rect x="13" y="27" width="5" height="9" rx="1" fill="#8b47d7" opacity="0.6"/><rect x="21" y="21" width="5" height="15" rx="1" fill="#8b47d7" opacity="0.75"/><rect x="29" y="15" width="5" height="21" rx="1" fill="#8b47d7" opacity="0.9"/><polyline points="15.5,25 23.5,19 31.5,12" fill="none" stroke="#8b47d7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>'},
+        'CLOUD_CONNECTOR': {c:'#046c7a',
+            s:'<circle cx="24" cy="24" r="20" fill="#046c7a" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#046c7a" stroke-width="1.5" filter="url(#FID)"/><path d="M14 26 Q11 26 11 23 Q11 19 14.5 18.5 Q15 14 20 14 Q23 12 27 14 Q30 12 33 15 Q36 16 35.5 19 Q37 21 35.5 23 Q35 26 32 26 Z" fill="none" stroke="#046c7a" stroke-width="1.8" stroke-linejoin="round"/><line x1="18" y1="33" x2="30" y2="33" stroke="#046c7a" stroke-width="1.8" stroke-linecap="round"/><polyline points="20,31 18,33 20,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="28,31 30,33 28,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>'},
+        'CONTENT_SERVER': {c:'#256f3a',
+            s:'<circle cx="24" cy="24" r="20" fill="#256f3a" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#256f3a" stroke-width="1.5" filter="url(#FID)"/><path d="M17 11 L29 11 L34 16 L34 37 L17 37 Z" fill="none" stroke="#256f3a" stroke-width="1.8"/><path d="M29 11 L29 16 L34 16" fill="none" stroke="#256f3a" stroke-width="1.5"/><line x1="20" y1="22" x2="30" y2="22" stroke="#256f3a" stroke-width="1" opacity="0.5"/><line x1="20" y1="26" x2="30" y2="26" stroke="#256f3a" stroke-width="1" opacity="0.5"/><line x1="20" y1="30" x2="27" y2="30" stroke="#256f3a" stroke-width="1" opacity="0.5"/>'},
+        'SAPROUTER': {c:'#788fa6',
+            s:'<circle cx="24" cy="24" r="20" fill="#788fa6" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#788fa6" stroke-width="1.5" filter="url(#FID)"/><path d="M24 10 L35 16 L35 26 Q35 34 24 38 Q13 34 13 26 L13 16 Z" fill="none" stroke="#788fa6" stroke-width="1.8" stroke-linejoin="round"/><rect x="20" y="24" width="8" height="6" rx="1.5" fill="#788fa6" opacity="0.6"/><path d="M22 24 L22 21 Q22 18 24 18 Q26 18 26 21 L26 24" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round"/>'},
+        'MDM': {c:'#5d36ff',
+            s:'<circle cx="24" cy="24" r="20" fill="#5d36ff" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#5d36ff" stroke-width="1.5" filter="url(#FID)"/><rect x="18" y="10" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/><rect x="7" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/><rect x="29" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/><path d="M24 17 L24 22 M13 22 L35 22 M13 22 L13 30 M35 22 L35 30" fill="none" stroke="#5d36ff" stroke-width="1.2"/>'},
+        'HANA': {c:'#aa0808',
+            s:'<circle cx="24" cy="24" r="20" fill="#aa0808" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#aa0808" stroke-width="1.5" filter="url(#FID)"/><ellipse cx="24" cy="15" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/><line x1="13" y1="15" x2="13" y2="33" stroke="#aa0808" stroke-width="1.8"/><line x1="35" y1="15" x2="35" y2="33" stroke="#aa0808" stroke-width="1.8"/><ellipse cx="24" cy="33" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/><polygon points="26,19 22,26 26,26 22,33" fill="none" stroke="#aa0808" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>'}
+    };
+    var o = m[t] || {c:'#788fa6', s:'<circle cx="24" cy="24" r="20" fill="#788fa6" opacity="0.12"/><circle cx="24" cy="24" r="20" fill="none" stroke="#788fa6" stroke-width="1.5" filter="url(#FID)"/><text x="24" y="28" text-anchor="middle" font-size="11" font-weight="bold" fill="#788fa6" font-family="sans-serif">SAP</text>'};
+    var svg = o.s.replace(/FID/g, id);
+    var defs = f;
+    if (t === 'ABAP+JAVA') {
+        defs = '<defs><filter id="' + id + '"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><linearGradient id="' + id + 'g" x1="0" y1="0" x2="1" y2="0"><stop offset="50%" stop-color="#0070f2"/><stop offset="50%" stop-color="#d27700"/></linearGradient></defs>';
+        svg = svg.replace(/FIDg/g, id + 'g');
+    }
+    return '<span class="sys-icon-h"><svg viewBox="0 0 48 48">' + defs + svg + '</svg></span>';
+}
+
 function renderSystems(systems) {
     var container = document.getElementById('systems-list');
     var badge = document.getElementById('systems-badge');
@@ -1698,10 +1718,6 @@ function renderSystems(systems) {
 
     var html = '';
     systems.forEach(function(sys, idx) {
-        var t = (sys.system_type || '').toUpperCase();
-        var iconClass = t.indexOf('JAVA') >= 0 ? 'java' : t === 'MDM' ? 'mdm' : t.indexOf('ABAP') >= 0 ? 'abap' : 'unknown';
-        var iconLabel = t || 'SAP';
-
         var portCount = 0;
         var allF = [];
         (sys.instances || []).forEach(function(inst) {
@@ -1725,7 +1741,7 @@ function renderSystems(systems) {
         if (med > 0) badges += '<span class="mini-badge mb-medium">' + med + '</span>';
 
         html += '<div class="sys-row" onclick="showSystemModal(' + idx + ')">' +
-            '<div class="sys-icon ' + iconClass + '">' + esc(iconLabel) + '</div>' +
+            sysTypeIcon(sys.system_type) +
             '<div class="sys-info">' +
                 '<div class="sys-name">' + esc(sys.sid) + ' &mdash; ' + esc(sys.hostname || ip) + '</div>' +
                 '<div class="sys-meta">' + esc(meta) + '</div>' +
@@ -1957,8 +1973,6 @@ function searchUrlPaths() {
 function showSystemModal(idx) {
     if (!scanData || !scanData.systems || !scanData.systems[idx]) return;
     var sys = scanData.systems[idx];
-    var t = (sys.system_type || '').toUpperCase();
-    var iconClass = t.indexOf('JAVA') >= 0 ? 'java' : t === 'MDM' ? 'mdm' : t.indexOf('ABAP') >= 0 ? 'abap' : 'unknown';
     var ip = (sys.instances && sys.instances[0]) ? sys.instances[0].ip : '';
 
     var info = '<div class="info-grid">' +
@@ -2056,8 +2070,7 @@ function showSystemModal(idx) {
     }
 
     document.getElementById('modal-title').innerHTML =
-        '<div class="sys-icon ' + iconClass + '" style="width:32px;height:32px;font-size:10px;">' +
-        esc(t || 'SAP') + '</div> ' + esc(sys.sid) + ' &mdash; ' + esc(sys.hostname || ip);
+        sysTypeIcon(sys.system_type) + ' ' + esc(sys.sid) + ' &mdash; ' + esc(sys.hostname || ip);
     document.getElementById('modal-body').innerHTML =
         '<div class="modal-section"><h4>System Information</h4>' + info + '</div>' +
         '<div class="modal-section"><h4>Open Ports</h4>' + ports + '</div>' +
@@ -2195,7 +2208,7 @@ function renderBtpView(btpEndpoints, btpSummary) {
             if (ep.status_code) meta += ' \u00b7 HTTP ' + ep.status_code;
 
             html += '<div class="sys-row" onclick="showBtpEndpointModal(' + idx + ')">' +
-                '<div class="sys-icon btp">' + esc(svcLabel) + '</div>' +
+                sysTypeIcon('CLOUD_CONNECTOR') +
                 '<div class="sys-info">' +
                     '<div class="sys-name">' + esc(ep.hostname) + '</div>' +
                     '<div class="sys-meta">' + esc(meta) + '</div>' +
@@ -2294,7 +2307,7 @@ function showBtpEndpointModal(idx) {
     });
 
     document.getElementById('modal-title').innerHTML =
-        '<div class="sys-icon btp" style="width:32px;height:32px;font-size:9px;">BTP</div> ' + esc(ep.hostname);
+        sysTypeIcon('CLOUD_CONNECTOR') + ' ' + esc(ep.hostname);
     document.getElementById('modal-body').innerHTML =
         '<div class="modal-section"><h4>Endpoint Information</h4>' + info + '</div>' +
         techHtml + sshHtml +
