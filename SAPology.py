@@ -3835,204 +3835,6 @@ def check_cve_2022_41272(host, port, timeout=5):
 # SECTION 7: Report Generation
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_html_icon_counter = 0
-
-def _system_type_icon_html(system_type):
-    """Return inline HTML Style H dark circle icon for a system type."""
-    global _html_icon_counter
-    _html_icon_counter += 1
-    fid = "rh%d" % _html_icon_counter
-    t = (system_type or "").upper()
-    _FILTER = ('<defs><filter id="%s"><feGaussianBlur stdDeviation="3" result="b"/>'
-               '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/>'
-               '</feMerge></filter></defs>' % fid)
-    _MAP = {
-        "ABAP": ("#0070f2",
-            '<circle cx="24" cy="24" r="20" fill="#0070f2" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#0070f2" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M17 14 Q14 14 14 17 L14 21 Q14 24 12 24 Q14 24 14 27 L14 31 Q14 34 17 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<path d="M31 14 Q34 14 34 17 L34 21 Q34 24 36 24 Q34 24 34 27 L34 31 Q34 34 31 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<circle cx="24" cy="24" r="1.5" fill="#0070f2"/>' % fid),
-        "JAVA": ("#d27700",
-            '<circle cx="24" cy="24" r="20" fill="#d27700" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#d27700" stroke-width="1.5" filter="url(#%s)"/>'
-            '<rect x="15" y="19" width="14" height="14" rx="3" fill="none" stroke="#d27700" stroke-width="1.8"/>'
-            '<path d="M29 23 Q34 23 34 27 Q34 31 29 31" fill="none" stroke="#d27700" stroke-width="1.5"/>'
-            '<path d="M19 17 C19 14 20.5 14 20.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/>'
-            '<path d="M24 17 C24 14 25.5 14 25.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/>'
-            '<line x1="14" y1="35" x2="30" y2="35" stroke="#d27700" stroke-width="1.8" stroke-linecap="round"/>' % fid),
-        "ABAP+JAVA": (None,
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="url(#%sg)" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M14 17 Q12 17 12 19 L12 22 Q12 24 10 24 Q12 24 12 26 L12 29 Q12 31 14 31" fill="none" stroke="#0070f2" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<rect x="29" y="20" width="8" height="8" rx="2" fill="none" stroke="#d27700" stroke-width="1.5"/>'
-            '<path d="M37 23 Q39.5 23 39.5 25 Q39.5 27 37 27" fill="none" stroke="#d27700" stroke-width="1.2"/>'
-            '<line x1="28" y1="30" x2="38" y2="30" stroke="#d27700" stroke-width="1.5" stroke-linecap="round"/>' % (fid, fid)),
-        "BUSINESSOBJECTS": ("#8b47d7",
-            '<circle cx="24" cy="24" r="20" fill="#8b47d7" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#8b47d7" stroke-width="1.5" filter="url(#%s)"/>'
-            '<rect x="13" y="27" width="5" height="9" rx="1" fill="#8b47d7" opacity="0.6"/>'
-            '<rect x="21" y="21" width="5" height="15" rx="1" fill="#8b47d7" opacity="0.75"/>'
-            '<rect x="29" y="15" width="5" height="21" rx="1" fill="#8b47d7" opacity="0.9"/>'
-            '<polyline points="15.5,25 23.5,19 31.5,12" fill="none" stroke="#8b47d7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>' % fid),
-        "CLOUD_CONNECTOR": ("#046c7a",
-            '<circle cx="24" cy="24" r="20" fill="#046c7a" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#046c7a" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M14 26 Q11 26 11 23 Q11 19 14.5 18.5 Q15 14 20 14 Q23 12 27 14 Q30 12 33 15 Q36 16 35.5 19 Q37 21 35.5 23 Q35 26 32 26 Z" fill="none" stroke="#046c7a" stroke-width="1.8" stroke-linejoin="round"/>'
-            '<line x1="18" y1="33" x2="30" y2="33" stroke="#046c7a" stroke-width="1.8" stroke-linecap="round"/>'
-            '<polyline points="20,31 18,33 20,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<polyline points="28,31 30,33 28,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>' % fid),
-        "CONTENT_SERVER": ("#256f3a",
-            '<circle cx="24" cy="24" r="20" fill="#256f3a" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#256f3a" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M17 11 L29 11 L34 16 L34 37 L17 37 Z" fill="none" stroke="#256f3a" stroke-width="1.8"/>'
-            '<path d="M29 11 L29 16 L34 16" fill="none" stroke="#256f3a" stroke-width="1.5"/>'
-            '<line x1="20" y1="22" x2="30" y2="22" stroke="#256f3a" stroke-width="1" opacity="0.5"/>'
-            '<line x1="20" y1="26" x2="30" y2="26" stroke="#256f3a" stroke-width="1" opacity="0.5"/>'
-            '<line x1="20" y1="30" x2="27" y2="30" stroke="#256f3a" stroke-width="1" opacity="0.5"/>' % fid),
-        "SAPROUTER": ("#788fa6",
-            '<circle cx="24" cy="24" r="20" fill="#788fa6" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#788fa6" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M24 10 L35 16 L35 26 Q35 34 24 38 Q13 34 13 26 L13 16 Z" fill="none" stroke="#788fa6" stroke-width="1.8" stroke-linejoin="round"/>'
-            '<rect x="20" y="24" width="8" height="6" rx="1.5" fill="#788fa6" opacity="0.6"/>'
-            '<path d="M22 24 L22 21 Q22 18 24 18 Q26 18 26 21 L26 24" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round"/>' % fid),
-        "MDM": ("#5d36ff",
-            '<circle cx="24" cy="24" r="20" fill="#5d36ff" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#5d36ff" stroke-width="1.5" filter="url(#%s)"/>'
-            '<rect x="18" y="10" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>'
-            '<rect x="7" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>'
-            '<rect x="29" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>'
-            '<path d="M24 17 L24 22 M13 22 L35 22 M13 22 L13 30 M35 22 L35 30" fill="none" stroke="#5d36ff" stroke-width="1.2"/>' % fid),
-        "HANA": ("#aa0808",
-            '<circle cx="24" cy="24" r="20" fill="#aa0808" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#aa0808" stroke-width="1.5" filter="url(#%s)"/>'
-            '<ellipse cx="24" cy="15" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/>'
-            '<line x1="13" y1="15" x2="13" y2="33" stroke="#aa0808" stroke-width="1.8"/>'
-            '<line x1="35" y1="15" x2="35" y2="33" stroke="#aa0808" stroke-width="1.8"/>'
-            '<ellipse cx="24" cy="33" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/>'
-            '<polygon points="26,19 22,26 26,26 22,33" fill="none" stroke="#aa0808" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>' % fid),
-    }
-    if t == "ABAP+JAVA":
-        _, svg_inner = _MAP[t]
-        defs = ('<defs><filter id="%s"><feGaussianBlur stdDeviation="3" result="b"/>'
-                '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-                '<linearGradient id="%sg" x1="0" y1="0" x2="1" y2="0">'
-                '<stop offset="50%%" stop-color="#0070f2"/><stop offset="50%%" stop-color="#d27700"/>'
-                '</linearGradient></defs>' % (fid, fid))
-    elif t in _MAP:
-        _, svg_inner = _MAP[t]
-        defs = _FILTER
-    else:
-        svg_inner = ('<circle cx="24" cy="24" r="20" fill="#788fa6" opacity="0.12"/>'
-                     '<circle cx="24" cy="24" r="20" fill="none" stroke="#788fa6" stroke-width="1.5" filter="url(#%s)"/>'
-                     '<text x="24" y="28" text-anchor="middle" font-size="11" font-weight="bold" fill="#788fa6" font-family="sans-serif">SAP</text>' % fid)
-        defs = _FILTER
-    return ('<span class="sys-icon-h"><svg viewBox="0 0 48 48" width="24" height="24">'
-            '%s%s</svg></span>' % (defs, svg_inner))
-
-
-_svg_icon_counter = 0
-
-def _system_type_icon_svg(system_type, x, y, size=24):
-    """Return SVG elements for a Style H dark circle icon at position (x, y).
-
-    The icon is rendered inside a <g> with transform to scale from the
-    48x48 viewBox to the requested pixel size.
-    Returns (svg_string, width).
-    """
-    global _svg_icon_counter
-    _svg_icon_counter += 1
-    fid = "ti%d" % _svg_icon_counter
-    t = (system_type or "").upper()
-    scale = size / 48.0
-    _FILTER = ('<filter id="%s"><feGaussianBlur stdDeviation="3" result="b"/>'
-               '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/>'
-               '</feMerge></filter>' % fid)
-    _MAP = {
-        "ABAP": ("#0070f2",
-            '<circle cx="24" cy="24" r="20" fill="#0070f2" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#0070f2" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M17 14 Q14 14 14 17 L14 21 Q14 24 12 24 Q14 24 14 27 L14 31 Q14 34 17 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<path d="M31 14 Q34 14 34 17 L34 21 Q34 24 36 24 Q34 24 34 27 L34 31 Q34 34 31 34" fill="none" stroke="#0070f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<circle cx="24" cy="24" r="1.5" fill="#0070f2"/>' % fid),
-        "JAVA": ("#d27700",
-            '<circle cx="24" cy="24" r="20" fill="#d27700" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#d27700" stroke-width="1.5" filter="url(#%s)"/>'
-            '<rect x="15" y="19" width="14" height="14" rx="3" fill="none" stroke="#d27700" stroke-width="1.8"/>'
-            '<path d="M29 23 Q34 23 34 27 Q34 31 29 31" fill="none" stroke="#d27700" stroke-width="1.5"/>'
-            '<path d="M19 17 C19 14 20.5 14 20.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/>'
-            '<path d="M24 17 C24 14 25.5 14 25.5 11" fill="none" stroke="#d27700" stroke-width="1.2" stroke-linecap="round"/>'
-            '<line x1="14" y1="35" x2="30" y2="35" stroke="#d27700" stroke-width="1.8" stroke-linecap="round"/>' % fid),
-        "ABAP+JAVA": (None,
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="url(#%sg)" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M14 17 Q12 17 12 19 L12 22 Q12 24 10 24 Q12 24 12 26 L12 29 Q12 31 14 31" fill="none" stroke="#0070f2" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<rect x="29" y="20" width="8" height="8" rx="2" fill="none" stroke="#d27700" stroke-width="1.5"/>'
-            '<path d="M37 23 Q39.5 23 39.5 25 Q39.5 27 37 27" fill="none" stroke="#d27700" stroke-width="1.2"/>'
-            '<line x1="28" y1="30" x2="38" y2="30" stroke="#d27700" stroke-width="1.5" stroke-linecap="round"/>' % (fid, fid)),
-        "BUSINESSOBJECTS": ("#8b47d7",
-            '<circle cx="24" cy="24" r="20" fill="#8b47d7" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#8b47d7" stroke-width="1.5" filter="url(#%s)"/>'
-            '<rect x="13" y="27" width="5" height="9" rx="1" fill="#8b47d7" opacity="0.6"/>'
-            '<rect x="21" y="21" width="5" height="15" rx="1" fill="#8b47d7" opacity="0.75"/>'
-            '<rect x="29" y="15" width="5" height="21" rx="1" fill="#8b47d7" opacity="0.9"/>'
-            '<polyline points="15.5,25 23.5,19 31.5,12" fill="none" stroke="#8b47d7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>' % fid),
-        "CLOUD_CONNECTOR": ("#046c7a",
-            '<circle cx="24" cy="24" r="20" fill="#046c7a" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#046c7a" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M14 26 Q11 26 11 23 Q11 19 14.5 18.5 Q15 14 20 14 Q23 12 27 14 Q30 12 33 15 Q36 16 35.5 19 Q37 21 35.5 23 Q35 26 32 26 Z" fill="none" stroke="#046c7a" stroke-width="1.8" stroke-linejoin="round"/>'
-            '<line x1="18" y1="33" x2="30" y2="33" stroke="#046c7a" stroke-width="1.8" stroke-linecap="round"/>'
-            '<polyline points="20,31 18,33 20,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<polyline points="28,31 30,33 28,35" fill="none" stroke="#046c7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>' % fid),
-        "CONTENT_SERVER": ("#256f3a",
-            '<circle cx="24" cy="24" r="20" fill="#256f3a" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#256f3a" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M17 11 L29 11 L34 16 L34 37 L17 37 Z" fill="none" stroke="#256f3a" stroke-width="1.8"/>'
-            '<path d="M29 11 L29 16 L34 16" fill="none" stroke="#256f3a" stroke-width="1.5"/>'
-            '<line x1="20" y1="22" x2="30" y2="22" stroke="#256f3a" stroke-width="1" opacity="0.5"/>'
-            '<line x1="20" y1="26" x2="30" y2="26" stroke="#256f3a" stroke-width="1" opacity="0.5"/>'
-            '<line x1="20" y1="30" x2="27" y2="30" stroke="#256f3a" stroke-width="1" opacity="0.5"/>' % fid),
-        "SAPROUTER": ("#788fa6",
-            '<circle cx="24" cy="24" r="20" fill="#788fa6" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#788fa6" stroke-width="1.5" filter="url(#%s)"/>'
-            '<path d="M24 10 L35 16 L35 26 Q35 34 24 38 Q13 34 13 26 L13 16 Z" fill="none" stroke="#788fa6" stroke-width="1.8" stroke-linejoin="round"/>'
-            '<rect x="20" y="24" width="8" height="6" rx="1.5" fill="#788fa6" opacity="0.6"/>'
-            '<path d="M22 24 L22 21 Q22 18 24 18 Q26 18 26 21 L26 24" fill="none" stroke="#788fa6" stroke-width="1.5" stroke-linecap="round"/>' % fid),
-        "MDM": ("#5d36ff",
-            '<circle cx="24" cy="24" r="20" fill="#5d36ff" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#5d36ff" stroke-width="1.5" filter="url(#%s)"/>'
-            '<rect x="18" y="10" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>'
-            '<rect x="7" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>'
-            '<rect x="29" y="30" width="12" height="7" rx="2" fill="none" stroke="#5d36ff" stroke-width="1.8"/>'
-            '<path d="M24 17 L24 22 M13 22 L35 22 M13 22 L13 30 M35 22 L35 30" fill="none" stroke="#5d36ff" stroke-width="1.2"/>' % fid),
-        "HANA": ("#aa0808",
-            '<circle cx="24" cy="24" r="20" fill="#aa0808" opacity="0.12"/>'
-            '<circle cx="24" cy="24" r="20" fill="none" stroke="#aa0808" stroke-width="1.5" filter="url(#%s)"/>'
-            '<ellipse cx="24" cy="15" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/>'
-            '<line x1="13" y1="15" x2="13" y2="33" stroke="#aa0808" stroke-width="1.8"/>'
-            '<line x1="35" y1="15" x2="35" y2="33" stroke="#aa0808" stroke-width="1.8"/>'
-            '<ellipse cx="24" cy="33" rx="11" ry="4.5" fill="none" stroke="#aa0808" stroke-width="1.8"/>'
-            '<polygon points="26,19 22,26 26,26 22,33" fill="none" stroke="#aa0808" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>' % fid),
-    }
-    if not t:
-        return ("", 0)
-    if t == "ABAP+JAVA" and t in _MAP:
-        _, svg_inner = _MAP[t]
-        defs = ('<defs>%s<linearGradient id="%sg" x1="0" y1="0" x2="1" y2="0">'
-                '<stop offset="50%%" stop-color="#0070f2"/>'
-                '<stop offset="50%%" stop-color="#d27700"/>'
-                '</linearGradient></defs>' % (_FILTER, fid))
-    elif t in _MAP:
-        _, svg_inner = _MAP[t]
-        defs = '<defs>%s</defs>' % _FILTER
-    else:
-        svg_inner = ('<circle cx="24" cy="24" r="20" fill="#788fa6" opacity="0.12"/>'
-                     '<circle cx="24" cy="24" r="20" fill="none" stroke="#788fa6" stroke-width="1.5" filter="url(#%s)"/>'
-                     '<text x="24" y="28" text-anchor="middle" font-size="11" font-weight="bold" fill="#788fa6" font-family="sans-serif">SAP</text>' % fid)
-        defs = '<defs>%s</defs>' % _FILTER
-    svg = ('<g transform="translate(%d,%d) scale(%.4f)">%s%s</g>'
-           % (x, y, scale, defs, svg_inner))
-    return (svg, size)
-
-
 def generate_svg_topology(landscape):
     """Generate an SVG network topology diagram."""
     systems = landscape
@@ -4083,28 +3885,20 @@ def generate_svg_topology(landscape):
                      'rx="6" fill="%s" stroke="%s" stroke-width="2"/>'
                      % (x, y, box_w, box_h, fill, border_color))
 
-        # SID header with pill badge
+        # SID header
         inst_nrs = sorted(set(i.instance_nr for i in sys_obj.instances if i.instance_nr != "XX"))
+        header_parts = [sys_obj.sid]
+        if sys_obj.system_type:
+            header_parts.append(sys_obj.system_type)
+        if inst_nrs:
+            header_parts.append("[%s]" % ",".join(inst_nrs))
+        header_text = "  ".join(header_parts)
         lines.append('<rect x="%d" y="%d" width="%d" height="30" '
                      'rx="6" fill="%s" opacity="0.3"/>'
                      % (x, y, box_w, color))
-
-        # SID text (left-aligned)
         lines.append('<text x="%d" y="%d" fill="white" font-size="14" '
-                     'font-family="monospace" font-weight="bold">%s</text>'
-                     % (x + 10, y + 20, html.escape(sys_obj.sid)))
-
-        # System type icon (after SID)
-        icon_x = x + 10 + len(sys_obj.sid) * 9 + 8
-        icon_svg, icon_w = _system_type_icon_svg(sys_obj.system_type, icon_x, y + 3)
-        if icon_svg:
-            lines.append(icon_svg)
-
-        # Instance numbers (right-aligned)
-        if inst_nrs:
-            lines.append('<text x="%d" y="%d" fill="#b0b0b0" font-size="12" '
-                         'font-family="monospace" text-anchor="end">[%s]</text>'
-                         % (x + box_w - 10, y + 20, html.escape(",".join(inst_nrs))))
+                     'font-family="monospace" font-weight="bold" text-anchor="middle">%s</text>'
+                     % (x + box_w // 2, y + 20, html.escape(header_text)))
 
         # Instance details with tooltips
         text_y = y + 50
@@ -4298,11 +4092,9 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         meta_parts.append("Instances: %d" % len(sys_obj.instances))
         meta_str = " | ".join(meta_parts)
 
-        type_pill = _system_type_icon_html(sys_obj.system_type)
-
         system_details += """
         <div class="system-card" style="border-left: 4px solid %s">
-          <h3>%s %s %s</h3>
+          <h3>%s %s</h3>
           <p class="system-meta">%s</p>
           <table>
             <thead>
@@ -4313,7 +4105,6 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         </div>
         """ % (
             border_color,
-            type_pill,
             html.escape(sys_obj.sid),
             ("(%s)" % html.escape(sys_obj.hostname)) if sys_obj.hostname else "",
             meta_str,
@@ -4521,9 +4312,6 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
                     text-align: center; }
   .system-card { background: var(--card-bg); border-radius: 8px; padding: 20px;
                  margin: 15px 0; border: 1px solid var(--border); }
-  .system-card h3 { display: flex; align-items: center; gap: 10px; }
-  .sys-icon-h { display: inline-flex; align-items: center; flex-shrink: 0; }
-  .sys-icon-h svg { width: 24px; height: 24px; vertical-align: middle; }
   .system-meta { color: var(--text-dim); font-size: 13px; margin-bottom: 15px; }
   .detail-cell { max-width: 400px; word-wrap: break-word; font-size: 12px; }
   .metadata { background: var(--card-bg); border-radius: 8px; padding: 20px;
