@@ -616,6 +616,7 @@ class SAPSystem:
     sap_release: str = ""
     db_type: str = ""
     clients: List[str] = field(default_factory=list)
+    clients_redirected: bool = False
     relationships: List[dict] = field(default_factory=list)
 
     def highest_severity(self) -> Optional[Severity]:
@@ -642,6 +643,7 @@ class SAPSystem:
             "sap_release": self.sap_release,
             "db_type": self.db_type,
             "clients": self.clients,
+            "clients_redirected": self.clients_redirected,
             "instances": [i.to_dict() for i in self.instances],
             "relationships": self.relationships,
         }
@@ -4166,7 +4168,10 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         if sys_obj.db_type:
             meta_parts.append("DB: %s" % html.escape(sys_obj.db_type))
         if sys_obj.clients:
-            meta_parts.append("Clients: %s" % html.escape(", ".join(sys_obj.clients)))
+            clients_str = html.escape(", ".join(sys_obj.clients))
+            if sys_obj.clients_redirected:
+                clients_str += " <i>(other clients may exist but cannot be detected via DIAG)</i>"
+            meta_parts.append("Clients: %s" % clients_str)
         meta_parts.append("Instances: %d" % len(sys_obj.instances))
         meta_str = " | ".join(meta_parts)
 
@@ -5411,8 +5416,11 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                 if result.get("clients"):
                                     sys_obj.clients = sorted(result["clients"])
                                     if result.get("redirected"):
-                                        print("[*] %s:%d - Client redirection detected, default client: %s" % (
+                                        sys_obj.clients_redirected = True
+                                        print("[*] %s:%d - Client redirection/hardening detected, default client: %s" % (
                                             target_ip, port, ", ".join(sys_obj.clients)))
+                                        print("[*] %s:%d - Other clients may exist but cannot be detected via DIAG" % (
+                                            target_ip, port))
                                     else:
                                         print("[*] %s:%d - Found %d client(s): %s" % (
                                             target_ip, port, len(sys_obj.clients), ", ".join(sys_obj.clients)))

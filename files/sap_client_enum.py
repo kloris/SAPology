@@ -582,10 +582,10 @@ def enumerate_clients(host, port, timeout=5, max_workers=20,
     # enumeration impossible. Detect this before wasting 1000 probes.
     is_redirecting, default_client, _ = _check_client_redirection(host, port, timeout)
     if is_redirecting:
-        if verbose:
-            print("  [!] Client redirection detected (default client: %s)" %
-                  (default_client or "unknown"))
-            print("  [!] System ignores client field — reporting default client only")
+        print("  [!] Client redirection/hardening detected — server never returns")
+        print("      'Client not available', making per-client enumeration impossible.")
+        print("      Default client from login screen: %s" % (default_client or "unknown"))
+        print("      Note: other clients may exist but cannot be detected via DIAG.")
         if default_client:
             result["clients"] = [default_client]
         result["redirected"] = True
