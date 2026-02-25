@@ -2661,7 +2661,7 @@ def check_ms_acl(host, port, timeout=5):
             if acl_result != MS_OPCODE_ERROR_ACCESS_DENIED:
                 finding = Finding(
                     name="Message Server ACL Not Enforced",
-                    severity=Severity.HIGH,
+                    severity=Severity.CRITICAL,
                     description=(
                         "The Message Server on port %d has no restrictive ACL "
                         "configured (ms/acl_info). Any host can register as an "
