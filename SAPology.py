@@ -4874,16 +4874,19 @@ def parse_targets(target_str=None, target_file=None):
 
 
 def parse_instance_range(range_str):
-    """Parse instance range like '00-09' or '00,01,10'."""
+    """Parse instance range like '00-09' or '00,01,10'.
+    Values are capped to the valid SAP instance range 0-99."""
     instances = []
     for part in range_str.split(","):
         part = part.strip()
         if "-" in part:
             start, end = part.split("-", 1)
-            for i in range(int(start), int(end) + 1):
+            start, end = max(0, min(99, int(start))), max(0, min(99, int(end)))
+            for i in range(start, end + 1):
                 instances.append(i)
         else:
-            instances.append(int(part))
+            val = max(0, min(99, int(part)))
+            instances.append(val)
     return sorted(set(instances))
 
 
@@ -7160,6 +7163,11 @@ examples:
                            help="Censys API secret")
 
     args = parser.parse_args()
+
+    # Clamp CLI parameters to sane bounds
+    args.timeout = max(1, min(60, args.timeout))
+    args.threads = max(1, min(100, args.threads))
+    args.url_scan_threads = max(1, min(100, args.url_scan_threads))
 
     has_btp = (args.btp or args.btp_target or args.btp_discover or args.btp_domain
                or args.btp_subaccount or args.btp_targets)
