@@ -2622,10 +2622,10 @@ def check_ms_internal_open(host, port, timeout=5):
 def check_ms_acl(host, port, timeout=5):
     """Check if the MS ACL allows rogue Application Server registration.
 
-    The MS_CHECK_ACL opcode is unreliable (returns MSOP_OK even when the
-    ACL is properly configured).  Instead, attempt an actual MS_SERVER_ADD
-    which is the definitive test: ACCESS_DENIED means the ACL is enforced,
-    MSOP_OK means any host can register as an Application Server.
+    MS_CHECK_ACL (opcode 71) always returns opcode_error=0 in the header,
+    but the *payload* at offset 1 contains the real result:
+      0x00 = no ACL restriction (scanner host can register)
+      0x05 = ACCESS_DENIED (ACL is enforced)
     """
     finding = None
     sock = None
@@ -2633,17 +2633,8 @@ def check_ms_acl(host, port, timeout=5):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         sock.connect((host, port))
-        scanner_ip = sock.getsockname()[0]
 
-        # Login with a fake server name (required for server operations)
-        fake_name = pad_right(b"_SAPLGY_TEST", 40)
-        login = build_ms_header(
-            toname=b"-" + b" " * 39,
-            fromname=fake_name,
-            flag=MS_FLAG_UNKNOWN,
-            iflag=MS_IFLAG_LOGIN_2,
-            diag_port=3200,
-        )
+        login = build_ms_login_anon()
         ni_send(sock, login)
         resp = ni_recv(sock, timeout)
 
@@ -2651,46 +2642,40 @@ def check_ms_acl(host, port, timeout=5):
             sock.close()
             return None
 
-        # Build a SAPMSClient4 record (160 bytes) for the registration attempt
-        client4 = bytearray(MS_CLIENT4_SIZE)
-        client4[0:40] = fake_name
-        client4[40:72] = pad_right(scanner_ip.encode("ascii"), 32)
-        client4[72:92] = pad_right(b"sapdp00", 20)
-        client4[92] = 0x02  # msgtype = DIALOG
-
-        # Attempt MS_SERVER_ADD — the definitive ACL test
+        anon_name = b"-" + b" " * 39
         req = build_ms_request(
             toname=b"MSG_SERVER" + b" " * 30,
-            fromname=fake_name,
-            opcode=MS_OPCODE_SERVER_ADD,
-            opcode_version=4,
+            fromname=anon_name,
+            opcode=MS_OPCODE_CHECK_ACL,
             opcode_charset=0,
-            payload=bytes(client4),
         )
         ni_send(sock, req)
         resp = ni_recv(sock, timeout)
 
-        if len(resp) > 111:
-            opcode_error = resp[111]
-            if opcode_error == MS_OPCODE_ERROR_OK:
+        # The real ACL result is in the payload at offset 115 (= header 114 + 1)
+        # payload[0] is padding, payload[1] is the ACL error code:
+        #   0x00 = OK (no ACL or scanner is allowed)
+        #   0x05 = ACCESS_DENIED (ACL blocks this host)
+        if len(resp) > 115:
+            acl_result = resp[115]
+            if acl_result != MS_OPCODE_ERROR_ACCESS_DENIED:
                 finding = Finding(
                     name="Message Server ACL Not Enforced",
                     severity=Severity.HIGH,
                     description=(
-                        "The Message Server on port %d allowed registering a rogue "
-                        "Application Server via MS_SERVER_ADD (no ACL enforcement). "
-                        "An attacker can register as an Application Server and pivot "
-                        "to trusted gateway exploitation." % port
+                        "The Message Server on port %d has no restrictive ACL "
+                        "configured (ms/acl_info). Any host can register as an "
+                        "Application Server and pivot to trusted gateway "
+                        "exploitation." % port
                     ),
                     remediation=(
                         "Configure ms/acl_info with a restrictive ACL file that only "
                         "allows trusted application server hosts. "
                         "Apply SAP Note 2828682."
                     ),
-                    detail="MS_SERVER_ADD returned MSOP_OK from %s" % scanner_ip,
+                    detail="MS_CHECK_ACL payload indicates no ACL restriction",
                     port=port,
                 )
-            # ACCESS_DENIED or other error = ACL is enforced, no finding
 
         try:
             ni_send(sock, build_ms_logout())
