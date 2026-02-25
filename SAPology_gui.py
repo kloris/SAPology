@@ -278,8 +278,8 @@ class SAPologyApi:
             instances = SAPology.parse_instance_range(
                 config.get("instances", "00-99"))
 
-            timeout_val = int(config.get("timeout", 3))
-            threads_val = int(config.get("threads", 20))
+            timeout_val = max(1, min(60, int(config.get("timeout", 3))))
+            threads_val = max(1, min(100, int(config.get("threads", 20))))
 
             self.scan_params = {
                 "targets": targets,
@@ -288,7 +288,7 @@ class SAPologyApi:
                 "threads": threads_val,
                 "gw_test_cmd": config.get("gw_cmd", "whoami"),
                 "url_scan": config.get("url_scan", True),
-                "url_scan_threads": int(config.get("url_scan_threads", 25)),
+                "url_scan_threads": max(1, min(100, int(config.get("url_scan_threads", 25)))),
                 "verbose": config.get("verbose", False),
             }
 
@@ -1111,11 +1111,11 @@ GUI_HTML = r"""<!DOCTYPE html>
       <div class="field-row">
         <div class="field-group">
           <div class="field-label">Threads</div>
-          <input type="number" class="field-input" id="input-threads" value="20" min="1" max="200">
+          <input type="number" class="field-input" id="input-threads" value="20" min="1" max="100">
         </div>
         <div class="field-group">
           <div class="field-label">Timeout (s)</div>
-          <input type="number" class="field-input" id="input-timeout" value="3" min="1" max="30">
+          <input type="number" class="field-input" id="input-timeout" value="3" min="1" max="60">
         </div>
       </div>
       <div class="field-group">
