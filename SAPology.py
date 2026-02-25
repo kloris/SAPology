@@ -98,6 +98,7 @@ import gzip
 import io
 import traceback
 import re
+import subprocess
 import warnings
 import asyncio
 import contextlib
@@ -4890,6 +4891,18 @@ def parse_instance_range(range_str):
     return sorted(set(instances))
 
 
+def _check_host_alive(host, timeout=2):
+    """Quick reachability check via ICMP ping."""
+    try:
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", str(timeout), host],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=timeout + 1)
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
 def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                      cancel_check=None, client_enum=True):
     """Phase 1: Discover SAP systems by port scanning and fingerprinting.
@@ -4899,6 +4912,27 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
     landscape = []
 
     has_progress = HAS_RICH
+
+    # Host reachability check — skip targets that are down
+    print("\n[*] Checking host reachability for %d target(s) ..." % len(targets))
+    alive_targets = []
+    with ThreadPoolExecutor(max_workers=min(len(targets), threads)) as executor:
+        futures = {executor.submit(_check_host_alive, t, min(timeout, 2)): t for t in targets}
+        for future in as_completed(futures):
+            if cancel_check and cancel_check():
+                for f in futures:
+                    f.cancel()
+                break
+            host = futures[future]
+            if future.result():
+                alive_targets.append(host)
+                print("[+] %s is reachable" % host)
+            else:
+                print("[-] %s is unreachable, skipping" % host)
+    targets = alive_targets
+    if not targets:
+        print("[*] No reachable targets found, nothing to scan.")
+        return landscape
 
     # Two-phase scanning: quick pre-scan with dispatcher/gateway only,
     # then full scan only on hosts where SAP was detected.
