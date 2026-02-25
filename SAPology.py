@@ -5181,7 +5181,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                             sys_obj.sid = parts[-2]
                                             sid_found = True
 
-                    instance.services["sapcontrol"] = {"port": port, "ssl": use_ssl}
+                        instance.services["sapcontrol"] = {"port": port, "ssl": use_ssl}
 
                 # ICM HTTP
                 elif "ICM HTTP" in svc_desc or "HTTP" in svc_desc:
