@@ -4910,15 +4910,39 @@ def parse_instance_range(range_str):
 
 
 def _check_host_alive(host, timeout=2):
-    """Quick reachability check via ICMP ping."""
+    """Quick reachability check via ICMP ping, with TCP port fallback.
+
+    Tries ICMP ping first (fastest). If ping fails (many hosts block ICMP),
+    falls back to TCP connect probes on common SAP port ranges.
+    A TCP connect returning 'open' or 'refused' proves the host is up.
+    """
+    # Primary: ICMP ping
     try:
         result = subprocess.run(
             ["ping", "-c", "1", "-W", str(timeout), host],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=timeout + 1)
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
     except (subprocess.TimeoutExpired, OSError):
-        return False
+        pass
+    # Fallback: TCP probe on common SAP port ranges
+    probe_ports = (
+        list(range(3200, 3300)) + list(range(3300, 3311)) +
+        [8000, 8443, 50013, 443, 1128, 1129]
+    )
+    for port in probe_ports:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            result = s.connect_ex((host, port))
+            s.close()
+            # 0 = open, 111 = connection refused — both mean host is alive
+            if result in (0, 111):
+                return True
+        except (OSError, socket.timeout):
+            continue
+    return False
 
 
 def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
