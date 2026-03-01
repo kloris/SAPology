@@ -40,11 +40,13 @@
 | **BTP / Integration Suite** | No | High (iFlow + Cloud Connector) | High | Yes |
 | **JCo via JPype** | No (JCo has own native lib) | None | High | Experimental |
 | **NCo via pythonnet** | No (NCo reimplements RFC in C#) | None | High | Experimental |
-| **PyRFC alternatives (ctypes etc.)** | **Yes** | None | Low | Varies |
+| **ctypes + NW RFC SDK (SAPology)** | **Yes** | None | Low | **Yes** |
 | **Raw socket-level RFC** | No | None | Extreme | Research only |
 | **gRPC** | N/A | N/A | N/A | Not SAP-supported |
 
-**The quickest win is SOAP via `/sap/bc/soap/rfc` + the Python `zeep` library.** This requires almost zero SAP-side configuration and lets you call any RFC-enabled function module immediately.
+**For direct RFC protocol access: `files/sap_rfc_ctypes.py`** — a cross-platform Python ctypes wrapper for the SAP NW RFC SDK. No Cython compilation needed, works on Windows/Linux/macOS, auto-discovers table fields, proper error handling. Requires the SDK download from SAP.
+
+**For SDK-free access: SOAP via `/sap/bc/soap/rfc` + the Python `zeep` library.** This requires almost zero SAP-side configuration and lets you call any RFC-enabled function module immediately.
 
 For a pure-Python, SDK-free, direct-protocol approach: **pysap (OWASP)** provides the best foundation, but significant development (~13-20 weeks) would be needed to add RFC function call capabilities on top of its existing transport layer.
 
@@ -413,26 +415,267 @@ pip install pythonnet
 
 ---
 
-## 8. Approach 7: PyRFC Alternatives (Still Need the SDK)
+## 8. Approach 7: ctypes + SAP NW RFC SDK (Deep Dive)
 
-**Verdict: These all still require the SAP NetWeaver RFC SDK C library. Mentioned for completeness.**
+**Verdict: BEST option for direct RFC protocol access from Python. Cross-platform. Requires the SAP NW RFC SDK C library but no Cython compilation.**
 
-### SAP-RFC-Python-without-PyRFC (ctypes)
+This is the recommended approach when you need direct RFC protocol access (not SOAP/OData) and want a pure-Python solution that works on Windows, Linux, and macOS without build tools.
 
-A drop-in alternative to PyRFC. Uses Python `ctypes` to call the SAP NW RFC SDK directly without PyRFC's Cython layer.
+### Why ctypes Over PyRFC's Cython?
 
-- **GitHub:** [jdsricardo/SAP-RFC-Python-without-PyRFC](https://github.com/jdsricardo/SAP-RFC-Python-without-PyRFC)
-- Still requires: SAP NetWeaver RFC SDK (C library)
-- Status: Active, production-focused
+| Aspect | PyRFC (Cython) | ctypes Wrapper |
+|--------|:---:|:---:|
+| Requires C compiler | **Yes** (Cython → C → .so/.pyd) | **No** |
+| Requires SAP NW RFC SDK | Yes | Yes |
+| Cross-platform | Yes (but must compile per platform) | Yes (pure Python, same code everywhere) |
+| Installation | `pip install pyrfc` (often fails) | Copy one .py file |
+| Maintenance status | **Archived** (Dec 2024) | Active alternative |
+| Python version coupling | Tight (compiled extension) | None (pure Python) |
+| Performance | Slightly faster (native code) | Negligible difference for RFC calls |
 
-### pysaprfc (SourceForge)
+### The SAP NW RFC SDK C API
+
+The SDK exposes ~100 C functions through a single shared library:
+
+| Platform | Library File | Calling Convention |
+|----------|-------------|-------------------|
+| Windows | `sapnwrfc.dll` | `__stdcall` (WinDLL) |
+| Linux | `libsapnwrfc.so` | `cdecl` (CDLL) |
+| macOS | `libsapnwrfc.dylib` | `cdecl` (CDLL) |
+
+All handles are opaque `void*` pointers. All strings use `SAP_UC` (UTF-16, 2 bytes per character).
+
+#### Core SDK Functions
+
+```
+Connection:
+  RfcOpenConnection(params[], count, &errorInfo) → connectionHandle
+  RfcCloseConnection(handle, &errorInfo) → RFC_RC
+  RfcPing(handle, &errorInfo) → RFC_RC
+  RfcGetConnectionAttributes(handle, &attrs, &errorInfo) → RFC_RC
+
+Function Invocation:
+  RfcGetFunctionDesc(connHandle, funcName, &errorInfo) → funcDescHandle
+  RfcCreateFunction(funcDescHandle, &errorInfo) → funcHandle
+  RfcInvoke(connHandle, funcHandle, &errorInfo) → RFC_RC
+  RfcDestroyFunction(funcHandle, &errorInfo) → RFC_RC
+
+Metadata Introspection:
+  RfcGetParameterCount(funcDescHandle, &count, &errorInfo) → RFC_RC
+  RfcGetParameterDescByIndex(funcDescHandle, index, &paramDesc, &errorInfo) → RFC_RC
+  RfcGetFieldCount(typeDescHandle, &count, &errorInfo) → RFC_RC
+  RfcGetFieldDescByIndex(typeDescHandle, index, &fieldDesc, &errorInfo) → RFC_RC
+
+Data Getters/Setters (work on any DATA_CONTAINER_HANDLE):
+  RfcSetString / RfcGetString    — CHAR, STRING, NUM, BCD
+  RfcSetInt / RfcGetInt          — INT, INT1, INT2
+  RfcSetInt8 / RfcGetInt8        — INT8
+  RfcSetFloat / RfcGetFloat      — FLOAT
+  RfcSetDate / RfcGetDate        — DATE (SAP_UC[8] = YYYYMMDD)
+  RfcSetTime / RfcGetTime        — TIME (SAP_UC[6] = HHMMSS)
+  RfcSetBytes / RfcGetBytes      — BYTE (raw)
+  RfcSetXString / RfcGetXString  — XSTRING (variable-length raw)
+
+Table Operations:
+  RfcGetTable(container, name, &tableHandle, &errorInfo)
+  RfcGetRowCount(tableHandle, &count, &errorInfo)
+  RfcMoveTo(tableHandle, index, &errorInfo)
+  RfcGetCurrentRow(tableHandle, &errorInfo) → structHandle
+  RfcAppendNewRow(tableHandle, &errorInfo) → structHandle
+
+Structure Operations:
+  RfcGetStructure(container, name, &structHandle, &errorInfo)
+```
+
+#### Key Data Structures
+
+```c
+// Connection parameters (name-value pairs)
+typedef struct {
+    const SAP_UC* name;     // e.g., "ASHOST", "USER", "PASSWD"
+    const SAP_UC* value;
+} RFC_CONNECTION_PARAMETER;
+
+// Error information (filled by every SDK call)
+typedef struct {
+    RFC_RC code;            // 0 = OK, 1 = COMMUNICATION_FAILURE, 2 = LOGON_FAILURE, ...
+    RFC_ERROR_GROUP group;  // Maps to exception type
+    SAP_UC key[128];        // Error key string
+    SAP_UC message[512];    // Human-readable error message
+    SAP_UC abapMsgClass[21], abapMsgType[2], abapMsgNumber[4];
+    SAP_UC abapMsgV1[51], abapMsgV2[51], abapMsgV3[51], abapMsgV4[51];
+} RFC_ERROR_INFO;
+
+// Parameter descriptor (from function metadata)
+typedef struct {
+    RFC_ABAP_NAME name;     // SAP_UC[31]
+    RFC_DIRECTION direction; // 0x01=IMPORT, 0x02=EXPORT, 0x03=CHANGING, 0x07=TABLES
+    RFCTYPE type;           // 0=CHAR, 1=DATE, 2=BCD, 5=TABLE, 7=FLOAT, 8=INT, 17=STRUCTURE, 29=STRING, ...
+    unsigned nucLength, ucLength, decimals;
+    RFC_TYPE_DESC_HANDLE typeDescHandle;  // For structures/tables: recurse into this
+    ...
+} RFC_PARAMETER_DESC;
+```
+
+### The Cross-Platform SAP_UC Challenge
+
+**This is the single most critical issue for a cross-platform ctypes wrapper.**
+
+`SAP_UC` is always `unsigned short` (UTF-16, 2 bytes per character), regardless of platform. But Python's `ctypes.c_wchar` differs:
+
+| Platform | `c_wchar` size | Matches `SAP_UC`? | Consequence |
+|----------|:-:|:-:|---|
+| Windows | 2 bytes (UTF-16) | **Yes** | `c_wchar_p` works directly |
+| Linux | 4 bytes (UCS-4) | **No** | Struct layouts corrupt, strings garble |
+| macOS | 4 bytes (UCS-4) | **No** | Same as Linux |
+
+**The jdsricardo/SAP-RFC-Python-without-PyRFC project uses `c_wchar` everywhere, making it Windows-only.** On Linux, every struct field after the first `c_wchar` array would be at the wrong offset, causing silent data corruption or segfaults.
+
+**Solution**: Detect `c_wchar` size at import time. If 2 bytes, use `c_wchar`/`c_wchar_p` natively. If 4 bytes, use `c_uint16` arrays with manual UTF-16LE encoding/decoding:
+
+```python
+_UC_NATIVE = (ctypes.sizeof(ctypes.c_wchar) == 2)  # True on Windows
+
+if _UC_NATIVE:
+    _UC = ctypes.c_wchar          # Use c_wchar directly
+    _UC_P = ctypes.c_wchar_p
+    def _str_to_uc(s): return ctypes.c_wchar_p(s)
+    def _uc_to_str(buf): return buf.value
+else:
+    _UC = ctypes.c_uint16         # UTF-16 as uint16 array
+    def _str_to_uc(s):
+        encoded = s.encode('utf-16-le')
+        n = len(encoded) // 2
+        buf = (c_uint16 * (n + 1))()
+        ctypes.memmove(buf, encoded, len(encoded))
+        buf[n] = 0
+        return buf
+    def _uc_to_str(buf, length=None):
+        # ... scan for null, decode UTF-16LE
+```
+
+All struct definitions use `_UC` instead of `c_wchar`:
+
+```python
+class RFC_ERROR_INFO(Structure):
+    _fields_ = [
+        ('code', c_long),
+        ('group', c_long),
+        ('key', _UC * 128),        # Works on both platforms
+        ('message', _UC * 512),
+        ...
+    ]
+```
+
+### SAPology's ctypes Implementation
+
+The file `files/sap_rfc_ctypes.py` implements a complete cross-platform wrapper:
+
+```python
+from sap_rfc_ctypes import RFCConnection
+
+# Context manager handles open/close automatically
+with RFCConnection(
+    ashost='saphost', sysnr='00', client='100',
+    user='RFC_USER', passwd='secret'
+) as conn:
+
+    # Simple call — all export/table parameters auto-discovered
+    result = conn.call('BAPI_COMPANY_GETLIST')
+    for company in result['COMPANY_LIST']:
+        print(company['COMPANY'], company['NAME1'])
+
+    # Call with import parameters
+    result = conn.call('RFC_READ_TABLE',
+                       QUERY_TABLE='USR02',
+                       DELIMITER='|',
+                       ROWCOUNT=10)
+    for row in result['DATA']:
+        print(row['WA'])
+
+    # Table input parameters (list of dicts)
+    result = conn.call('RFC_READ_TABLE',
+                       QUERY_TABLE='MARA',
+                       FIELDS=[{'FIELDNAME': 'MATNR'}, {'FIELDNAME': 'MTART'}],
+                       OPTIONS=[{'TEXT': "MTART = 'FERT'"}])
+
+    # Connection check
+    print(conn.ping())             # True/False
+    print(conn.get_attributes())   # {'sysId': 'ABC', 'host': '...', ...}
+```
+
+#### Features
+
+| Feature | Status |
+|---------|:---:|
+| Cross-platform (Windows/Linux/macOS) | **Yes** |
+| No compilation required | **Yes** |
+| No pip dependencies | **Yes** (stdlib only) |
+| Auto-discovery of table/structure fields | **Yes** (via metadata introspection) |
+| Type-aware getters/setters (INT, FLOAT, BCD, DATE, TIME, BYTE, XSTRING) | **Yes** |
+| Context manager (`with` statement) | **Yes** |
+| Error handling with typed exceptions | **Yes** |
+| Dynamic string buffer sizing | **Yes** |
+| Nested structure/table support | **Yes** |
+| Direct connection (ASHOST) | **Yes** |
+| Load-balanced connection (MSHOST/GROUP) | **Yes** (pass as connection params) |
+| SNC/SSO authentication | **Yes** (pass SNC params) |
+| SAProuter support | **Yes** (pass SAPROUTER param) |
+| CLI mode for quick testing | **Yes** |
+
+#### Comparison with Existing ctypes Implementation
+
+| Aspect | jdsricardo/SAP-RFC-Python-without-PyRFC | SAPology ctypes wrapper |
+|--------|---|---|
+| Platform | Windows only (`windll`, `c_wchar`) | Windows, Linux, macOS |
+| Error checking | Almost none (2 of ~15 calls checked) | Every SDK call checked |
+| Field discovery | Manual (caller lists field names) | Automatic via metadata |
+| Data types | Everything coerced to string | Native INT, FLOAT, BCD, DATE, TIME, BYTE, XSTRING |
+| Buffer sizing | Fixed 512 chars (silent truncation) | Dynamic (query length first, retry on overflow) |
+| Resource management | No context manager, no destructor | `with` statement, `__del__` fallback |
+| Connection types | ASHOST only | Any SDK-supported connection type |
+| License | Proprietary (no redistribution) | Open |
+
+### SDK Installation
+
+#### Windows
+
+1. Download SAP NW RFC SDK from [SAP Support Portal](https://support.sap.com/en/product/connectors/nwrfcsdk.html) (SAP S-user required)
+2. Extract to `C:\nwrfcsdk\` (or any path)
+3. Set environment variable: `SAPNWRFC_HOME=C:\nwrfcsdk`
+4. Ensure `C:\nwrfcsdk\lib` is in `PATH` or use `os.add_dll_directory()`
+
+Required files in `lib/`: `sapnwrfc.dll`, `libsapucum.dll`, `icudt*.dll`, `icuin*.dll`, `icuuc*.dll`, `libicudecnumber.dll`
+
+#### Linux
+
+1. Download SAP NW RFC SDK for Linux x86_64
+2. Extract to `/usr/local/sap/nwrfcsdk/`
+3. Create `/etc/ld.so.conf.d/nwrfcsdk.conf` containing: `/usr/local/sap/nwrfcsdk/lib`
+4. Run `sudo ldconfig`
+5. Set environment variable: `export SAPNWRFC_HOME=/usr/local/sap/nwrfcsdk`
+
+Required files in `lib/`: `libsapnwrfc.so`, `libsapucum.so`, `libicudata.so.50`, `libicui18n.so.50`, `libicuuc.so.50`, `libicudecnumber.so`
+
+#### macOS
+
+1. Download SAP NW RFC SDK for macOS (Darwin)
+2. Extract to `/usr/local/sap/nwrfcsdk/`
+3. Set: `export DYLD_LIBRARY_PATH=/usr/local/sap/nwrfcsdk/lib`
+4. Set: `export SAPNWRFC_HOME=/usr/local/sap/nwrfcsdk`
+
+Note: macOS SIP may restrict `DYLD_LIBRARY_PATH`. Use `install_name_tool` to fix rpath if needed.
+
+### Other ctypes-Based Approaches (for reference)
+
+#### pysaprfc (SourceForge)
 
 Older wrapper around SAP's classic `librfc32.dll` / `librfccm.so` using `ctypes`.
 
 - Still requires: SAP's classic RFC library (older than NW RFC SDK)
 - Status: Legacy, not actively maintained
 
-### python-sapnwrfc (Piers Harding)
+#### python-sapnwrfc (Piers Harding)
 
 Python interface to SAP NetWeaver using the RFC protocol.
 
@@ -440,7 +683,7 @@ Python interface to SAP NetWeaver using the RFC protocol.
 - Still requires: SAP NW RFC SDK
 - Status: Legacy
 
-### dlthub SAP Connector (C++)
+#### dlthub SAP Connector (C++)
 
 A new C++ connector under development to replace PyRFC for data ingestion workflows.
 
@@ -704,7 +947,7 @@ This dissector is the closest thing to public documentation of the RFC wire prot
 | 4 | **BTP / Integration Suite** | No | High | `requests` | **Yes** | High |
 | 5 | **JCo via JPype** | No* | None | `JPype1` | Experimental | High |
 | 6 | **NCo via pythonnet** | No* | None | `pythonnet` | Experimental | High |
-| 7 | **PyRFC alternatives** | **Yes** | None | ctypes, etc. | Varies | Low |
+| 7 | **ctypes + NW RFC SDK** | **Yes** | None | ctypes (stdlib) | **Yes** | Low |
 | 8 | **Raw socket-level RFC** | No | None | `socket`, `struct` | Research only | Extreme |
 | 9 | **gRPC** | N/A | N/A | N/A | No | N/A |
 
@@ -714,34 +957,45 @@ This dissector is the closest thing to public documentation of the RFC wire prot
 
 ## 15. Recommendations
 
-### For Production Use (SDK-Free)
+### For Direct RFC Protocol Access (Requires SDK)
 
-**Rank 1: SOAP via `/sap/bc/soap/rfc` + zeep**
-- Lowest barrier to entry
+**Rank 1: ctypes + SAP NW RFC SDK (`sap_rfc_ctypes.py`)**
+- Cross-platform (Windows, Linux, macOS) — pure Python, no compilation
+- Drop-in PyRFC replacement with the same call semantics
+- Auto-discovers table/structure fields via SDK metadata introspection
+- Type-aware: native INT, FLOAT, BCD, DATE, TIME, BYTE, XSTRING handling
+- Proper error handling with typed exceptions
+- No pip dependencies (stdlib only)
+- Only requires: SAP NW RFC SDK download + `SAPNWRFC_HOME` env var
+
+### For SDK-Free Access (No SAP Download Required)
+
+**Rank 2: SOAP via `/sap/bc/soap/rfc` + zeep**
+- Lowest barrier to entry, no SAP download needed
 - The SAP ICF service exists by default — just activate it in SICF
 - Call ANY RFC-enabled function module via SOAP from Python
 - Auto-generated WSDL at `http://<host>:<port>/sap/bc/soap/wsdl11?services=<FM_NAME>`
 - Only requires `pip install zeep requests`
 
-**Rank 2: OData via SEGW + pyodata/requests**
+**Rank 3: OData via SEGW + pyodata/requests**
 - SAP's strategic direction
 - Clean REST/JSON interface
 - Requires one-time ABAP-side SEGW project creation per function module
 
-**Rank 3: SAP Integration Suite middleware**
+**Rank 4: SAP Integration Suite middleware**
 - Best for complex enterprise scenarios with multiple systems
 - Abstracts RFC behind standard REST APIs
 
 ### For Direct Protocol Access (SDK-Free)
 
-**Rank 4: JCo via JPype** or **NCo via pythonnet**
+**Rank 5: JCo via JPype** or **NCo via pythonnet**
 - Viable if you need direct RFC protocol access without the NW RFC SDK specifically
 - Both JCo and NCo are independently maintained by SAP
 - Experimental/niche with limited community examples
 
 ### For Security Research
 
-**Rank 5: Raw socket-level RFC (pysap + SAPology)**
+**Rank 6: Raw socket-level RFC (pysap + SAPology)**
 - SAPology already demonstrates unauthenticated RFC_SYSTEM_INFO calls
 - pysap provides the transport layer foundation
 - The Wireshark dissector (`packet-saprfc.c`) is the Rosetta Stone for the wire protocol
@@ -775,7 +1029,8 @@ This dissector is the closest thing to public documentation of the RFC wire prot
 - [gelim/pysap fork](https://github.com/gelim/pysap) — Gateway/MS patches (Mathieu Geli)
 - [chipik/SAP_GW_RCE_exploit](https://github.com/chipik/SAP_GW_RCE_exploit) — Gateway RCE (Dmitry Chastuhin)
 - [SAP-archive/PyRFC](https://github.com/SAP-archive/PyRFC) — Archived
-- [jdsricardo/SAP-RFC-Python-without-PyRFC](https://github.com/jdsricardo/SAP-RFC-Python-without-PyRFC) — ctypes approach
+- [jdsricardo/SAP-RFC-Python-without-PyRFC](https://github.com/jdsricardo/SAP-RFC-Python-without-PyRFC) — ctypes approach (Windows-only)
+- `files/sap_rfc_ctypes.py` — SAPology's cross-platform ctypes wrapper (this project)
 - [piersharding/python-sapnwrfc](https://github.com/piersharding/python-sapnwrfc) — Legacy
 - [SAP/python-pyodata](https://github.com/SAP/python-pyodata) — SAP's official OData client
 - [SecureAuthCorp/SAP-Dissection-plug-in-for-Wireshark](https://github.com/SecureAuthCorp/SAP-Dissection-plug-in-for-Wireshark) — Wireshark SAP dissector (key file: `src/packet-saprfc.c`)
