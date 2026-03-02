@@ -230,6 +230,9 @@ SAP_FIXED_PORTS = {
     59950: "SAP MDM Server",
     59750: "SAP MDM Import Server",
     44300: "SAP Web Dispatcher HTTPS",
+    7210:  "MaxDB X Server",
+    1433:  "MSSQL",
+    1521:  "Oracle DB Listener",
 }
 
 # Well-known non-SAP ports that collide with SAP port formulas.
@@ -619,6 +622,10 @@ class SAPSystem:
     clients: List[str] = field(default_factory=list)
     clients_redirected: bool = False
     has_hana: bool = False
+    has_maxdb: bool = False
+    has_mssql: bool = False
+    has_oracle: bool = False
+    has_db2: bool = False
     relationships: List[dict] = field(default_factory=list)
 
     def highest_severity(self) -> Optional[Severity]:
@@ -1531,6 +1538,150 @@ def fingerprint_saprouter(host, port, timeout=3):
         except (socket.error, OSError):
             pass
 
+    return info
+
+
+def fingerprint_maxdb(host, port, timeout=3):
+    """Fingerprint SAP MaxDB X Server on port 7210.
+
+    Sends a short packet and checks for the MaxDB "Rejected bad connect packet"
+    response, which confirms the service is a MaxDB X Server.
+    """
+    info = {"accessible": False, "confirmed": False}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        info["accessible"] = True
+        # Send a minimal probe — MaxDB X Server responds with an error message
+        sock.sendall(b"\x00\x00\x00\x04TEST")
+        resp = b""
+        try:
+            resp = sock.recv(4096)
+        except socket.timeout:
+            pass
+        sock.close()
+        if resp and b"Rejected bad connect packet" in resp:
+            info["confirmed"] = True
+            info["detail"] = "MaxDB X Server confirmed on port %d" % port
+        elif resp:
+            info["detail"] = "Port %d responded (%d bytes)" % (port, len(resp))
+        else:
+            info["detail"] = "Port %d open (no response to probe)" % port
+    except (socket.error, OSError):
+        pass
+    return info
+
+
+def fingerprint_mssql(host, port, timeout=3):
+    """Fingerprint Microsoft SQL Server using TDS PreLogin probe.
+
+    Sends a TDS PreLogin packet (same as nmap ms-sql-s probe) and checks
+    if the response starts with 0x04 0x01 (TDS response header).
+    """
+    info = {"accessible": False, "confirmed": False}
+    # TDS PreLogin packet (from nmap ms-sql-s probe)
+    tds_prelogin = (
+        b"\x12\x01\x00\x34\x00\x00\x00\x00\x00\x00\x15\x00\x06\x01"
+        b"\x00\x1b\x00\x01\x02\x00\x1c\x00\x0c\x03\x00\x28\x00\x04"
+        b"\xff\x08\x00\x01\x55\x00\x00\x00\x4d\x53\x53\x51\x4c\x53"
+        b"\x65\x72\x76\x65\x72\x00\x48\x0f\x00\x00"
+    )
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        info["accessible"] = True
+        sock.sendall(tds_prelogin)
+        resp = b""
+        try:
+            resp = sock.recv(4096)
+        except socket.timeout:
+            pass
+        sock.close()
+        if resp and len(resp) >= 2 and resp[0] == 0x04 and resp[1] == 0x01:
+            info["confirmed"] = True
+            info["detail"] = "MSSQL TDS service confirmed on port %d" % port
+        elif resp:
+            info["detail"] = "Port %d responded (%d bytes)" % (port, len(resp))
+        else:
+            info["detail"] = "Port %d open (no response to probe)" % port
+    except (socket.error, OSError):
+        pass
+    return info
+
+
+def fingerprint_oracle(host, port, timeout=3):
+    """Fingerprint Oracle Database TNS Listener.
+
+    Sends a TNS Connect version command (same as nmap oracle-tns probe) and
+    checks for TNS response signatures (TNSLSNR, DESCRIPTION, TNS header).
+    """
+    info = {"accessible": False, "confirmed": False}
+    # TNS Connect version probe (from nmap oracle-tns probe)
+    tns_probe = (
+        b"\x00\x5a\x00\x00\x01\x00\x00\x00\x01\x36\x01\x2c\x00\x00"
+        b"\x08\x00\x7f\xff\x7f\x08\x00\x00\x00\x01\x00\x20\x00\x3a"
+        b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        b"\x00\x00\x34\xe6\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+        b"\x00\x00(CONNECT_DATA=(COMMAND=version))"
+    )
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        info["accessible"] = True
+        sock.sendall(tns_probe)
+        resp = b""
+        try:
+            resp = sock.recv(4096)
+        except socket.timeout:
+            pass
+        sock.close()
+        if resp and len(resp) >= 4:
+            # TNS Accept (0x02) or Refuse (0x04) response
+            if resp[4] in (0x02, 0x04):
+                info["confirmed"] = True
+            if b"TNSLSNR" in resp:
+                info["confirmed"] = True
+                m = re.search(rb"TNSLSNR for ([^:]+): Version ([\d.]+)", resp)
+                if m:
+                    info["platform"] = m.group(1).decode(errors="replace")
+                    info["version"] = m.group(2).decode(errors="replace")
+            elif b"DESCRIPTION" in resp:
+                info["confirmed"] = True
+            if info["confirmed"]:
+                detail = "Oracle TNS Listener confirmed on port %d" % port
+                if info.get("version"):
+                    detail += " (version %s)" % info["version"]
+                info["detail"] = detail
+            else:
+                info["detail"] = "Port %d responded (%d bytes)" % (port, len(resp))
+        elif resp:
+            info["detail"] = "Port %d responded (%d bytes)" % (port, len(resp))
+        else:
+            info["detail"] = "Port %d open (no response to probe)" % port
+    except (socket.error, OSError):
+        pass
+    return info
+
+
+def fingerprint_db2(host, port, timeout=3):
+    """Fingerprint IBM DB2 via TCP connect on port 50000.
+
+    DB2 uses the DRDA protocol which is complex to probe. A TCP connect
+    confirmation on port 50000 in an SAP context is sufficient for detection.
+    """
+    info = {"accessible": False, "confirmed": False}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        info["accessible"] = True
+        info["detail"] = "IBM DB2 port %d open" % port
+        sock.close()
+    except (socket.error, OSError):
+        pass
     return info
 
 
@@ -3866,6 +4017,10 @@ def _system_type_pill_html(system_type):
         "SAPROUTER":       ("#788fa6", "Router",   '<path d="M2,6 L6,2 L10,6 L6,10 Z" fill="none" stroke="white" stroke-width="1.3"/>'),
         "MDM":             ("#5d36ff", "MDM",      '<rect x="1" y="1" width="4" height="4" rx="0.5" fill="white"/><rect x="7" y="1" width="4" height="4" rx="0.5" fill="white"/><rect x="1" y="7" width="4" height="4" rx="0.5" fill="white"/><rect x="7" y="7" width="4" height="4" rx="0.5" fill="white"/>'),
         "HANA":            ("#aa0808", "HANA",     '<rect x="1" y="5" width="2" height="7" fill="white"/><rect x="5" y="2" width="2" height="10" fill="white"/><rect x="9" y="0" width="2" height="12" fill="white"/>'),
+        "MAXDB":           ("#e07900", "MaxDB",    '<circle cx="6" cy="6" r="5" fill="none" stroke="white" stroke-width="1.5"/><circle cx="6" cy="6" r="1.5" fill="white"/>'),
+        "MSSQL":           ("#2f5ea0", "MSSQL",    '<rect x="1" y="1" width="10" height="10" rx="2" fill="none" stroke="white" stroke-width="1.2"/><line x1="1" y1="4" x2="11" y2="4" stroke="white" stroke-width="1"/><line x1="1" y1="7" x2="11" y2="7" stroke="white" stroke-width="1"/>'),
+        "ORACLE":          ("#c74634", "Oracle",   '<circle cx="6" cy="6" r="5" fill="none" stroke="white" stroke-width="1.5"/><line x1="3" y1="6" x2="9" y2="6" stroke="white" stroke-width="1"/>'),
+        "DB2":             ("#054ada", "DB2",      '<rect x="1" y="1" width="10" height="4" rx="1" fill="none" stroke="white" stroke-width="1"/><rect x="1" y="7" width="10" height="4" rx="1" fill="none" stroke="white" stroke-width="1"/>'),
     }
     if t == "ABAP+JAVA":
         color, label, svg = _MAP[t]
@@ -3895,6 +4050,10 @@ def _system_type_pill_svg(system_type, x, y):
         "SAPROUTER":       ("#788fa6", "Router", 56),
         "MDM":             ("#5d36ff", "MDM", 44),
         "HANA":            ("#aa0808", "HANA", 52),
+        "MAXDB":           ("#e07900", "MaxDB", 56),
+        "MSSQL":           ("#2f5ea0", "MSSQL", 56),
+        "ORACLE":          ("#c74634", "Oracle", 56),
+        "DB2":             ("#054ada", "DB2", 42),
     }
     if t not in _MAP:
         if not t:
@@ -3989,12 +4148,16 @@ def generate_svg_topology(landscape):
         if pill_svg:
             lines.append(pill_svg)
 
-        # HANA pill badge (after system type pill)
-        if sys_obj.has_hana:
-            hana_x = pill_x + pill_w + 4 if pill_w else pill_x
-            hana_svg, _ = _system_type_pill_svg("HANA", hana_x, y + 5)
-            if hana_svg:
-                lines.append(hana_svg)
+        # Database pill badges (after system type pill)
+        db_pill_x = pill_x + pill_w + 4 if pill_w else pill_x
+        for db_attr, db_key in [("has_hana", "HANA"), ("has_maxdb", "MAXDB"),
+                                ("has_mssql", "MSSQL"), ("has_oracle", "ORACLE"),
+                                ("has_db2", "DB2")]:
+            if getattr(sys_obj, db_attr):
+                db_svg, db_w = _system_type_pill_svg(db_key, db_pill_x, y + 5)
+                if db_svg:
+                    lines.append(db_svg)
+                    db_pill_x += db_w + 4
 
         # Instance numbers (right-aligned)
         if inst_nrs:
@@ -4198,7 +4361,12 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         meta_str = " | ".join(meta_parts)
 
         type_pill = _system_type_pill_html(sys_obj.system_type)
-        hana_pill = _system_type_pill_html("HANA") if sys_obj.has_hana else ""
+        db_pills = ""
+        for db_attr, db_key in [("has_hana", "HANA"), ("has_maxdb", "MAXDB"),
+                                ("has_mssql", "MSSQL"), ("has_oracle", "ORACLE"),
+                                ("has_db2", "DB2")]:
+            if getattr(sys_obj, db_attr):
+                db_pills += _system_type_pill_html(db_key)
 
         system_details += """
         <div class="system-card" style="border-left: 4px solid %s">
@@ -4214,7 +4382,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         """ % (
             border_color,
             type_pill,
-            hana_pill,
+            db_pills,
             html.escape(sys_obj.sid),
             ("(%s)" % html.escape(sys_obj.hostname)) if sys_obj.hostname else "",
             meta_str,
@@ -5675,17 +5843,41 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     break
             if type_parts:
                 sys_obj.system_type = "+".join(type_parts)
-        # Detect HANA database ports (3NN13/3NN15) — shown as additional pill
+        # Detect database ports — shown as additional pill badges
+        _db_port_map = {
+            "HANA SQL": "has_hana",
+            "MaxDB X Server": "has_maxdb",
+            "MSSQL": "has_mssql",
+            "Oracle DB Listener": "has_oracle",
+            "IBM DB2": "has_db2",
+        }
         for inst in sys_obj.instances:
             for desc in inst.ports.values():
-                if "HANA SQL" in desc:
-                    sys_obj.has_hana = True
-                    break
-            if sys_obj.has_hana:
-                break
+                for db_key, db_attr in _db_port_map.items():
+                    if db_key in desc and not getattr(sys_obj, db_attr):
+                        setattr(sys_obj, db_attr, True)
+        # Also infer DB type from RFCDBSYS if no DB port was found
+        if sys_obj.db_type:
+            dt = sys_obj.db_type.upper()
+            if "HDB" in dt or "HANA" in dt:
+                sys_obj.has_hana = True
+            elif "ADA" in dt or "MAXDB" in dt:
+                sys_obj.has_maxdb = True
+            elif "MSS" in dt:
+                sys_obj.has_mssql = True
+            elif "ORA" in dt:
+                sys_obj.has_oracle = True
+            elif "DB2" in dt or "DB6" in dt:
+                sys_obj.has_db2 = True
+        _db_labels = []
+        for label, attr in [("HANA", "has_hana"), ("MaxDB", "has_maxdb"),
+                            ("MSSQL", "has_mssql"), ("Oracle", "has_oracle"),
+                            ("DB2", "has_db2")]:
+            if getattr(sys_obj, attr):
+                _db_labels.append(label)
         if sys_obj.system_type:
-            print("[*]   System type detected: %s%s" % (
-                sys_obj.system_type, " + HANA" if sys_obj.has_hana else ""))
+            db_suffix = " + " + "/".join(_db_labels) if _db_labels else ""
+            print("[*]   System type detected: %s%s" % (sys_obj.system_type, db_suffix))
 
         # Skip non-SAP systems: if no kernel version was identified and SID is
         # still UNKNOWN, the host has no confirmed SAP services (e.g. generic
@@ -5795,6 +5987,11 @@ def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
             # HANA SQL ports
             for p, desc in inst.ports.items():
                 if "HANA SQL" in desc:
+                    total_checks += 1
+            # Database ports (MaxDB, MSSQL, Oracle, DB2)
+            _db_descs = ("MaxDB X Server", "MSSQL", "Oracle DB Listener", "IBM DB2")
+            for p, desc in inst.ports.items():
+                if desc in _db_descs:
                     total_checks += 1
             # SSL/TLS ports — count every unique port that will be checked
             _ssl_count_ports = set()
@@ -6222,6 +6419,46 @@ def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
                                 "segments." % p
                             ),
                             detail="TCP port %d (%s) open on %s" % (p, desc, inst.ip),
+                            port=p,
+                        ))
+                        step()
+
+                # Database port exposure checks (MaxDB, MSSQL, Oracle, DB2)
+                _db_checks = {
+                    "MaxDB X Server": ("MaxDB", fingerprint_maxdb),
+                    "MSSQL": ("MSSQL", fingerprint_mssql),
+                    "Oracle DB Listener": ("Oracle DB", fingerprint_oracle),
+                    "IBM DB2": ("IBM DB2", fingerprint_db2),
+                }
+                for p, desc in sorted(inst.ports.items()):
+                    if cancelled():
+                        break
+                    if desc in _db_checks:
+                        db_label, db_fp_func = _db_checks[desc]
+                        log_verbose("  %s port %d exposed on %s" % (db_label, p, inst.ip))
+                        fp = db_fp_func(inst.ip, p, timeout)
+                        detail = fp.get("detail", "TCP port %d open on %s" % (p, inst.ip))
+                        if fp.get("confirmed"):
+                            detail += " (service confirmed)"
+                        inst.findings.append(Finding(
+                            name="Database Port Exposed (%s)" % db_label,
+                            severity=Severity.LOW,
+                            description=(
+                                "The %s database port %d is accessible from the "
+                                "scanning host. Database ports are internal service "
+                                "ports that in many cases should be firewalled and "
+                                "only accessible to a specific group of users and "
+                                "machines (e.g. application servers, database "
+                                "administrators)." % (db_label, p)
+                            ),
+                            remediation=(
+                                "Restrict access to %s port %d using firewall rules "
+                                "so that only authorized application servers and DBA "
+                                "workstations can reach it. The port should not be "
+                                "accessible from untrusted networks or general user "
+                                "segments." % (db_label, p)
+                            ),
+                            detail=detail,
                             port=p,
                         ))
                         step()
@@ -7285,6 +7522,7 @@ vulnerability checks (on-premises):
   BO CMS port exposed        --           CMS port reachable (CVE-2026-0485/0490)
   Cloud Connector exposed    --           Administration port accessible from network
   HANA SQL port exposed      --           Database ports accessible from network
+  Database port exposed      --           MaxDB/MSSQL/Oracle/DB2 ports accessible
   SSL/TLS weaknesses         --           SSLv3, TLS 1.0/1.1, self-signed certificates
   HTTP verb tampering        --           Authentication bypass via HEAD/OPTIONS
   Info disclosure            --           /sap/public/info exposing system details
