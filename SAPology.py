@@ -2700,7 +2700,20 @@ def check_gw_sapxpg(host, port, sid, hostname, command, timeout=5, instance=None
             )
 
         sock.close()
-    except Exception:
+    except socket.timeout:
+        log_verbose("    GW SAPXPG check timed out on %s:%d" % (host, port))
+        try:
+            sock.close()
+        except Exception:
+            pass
+    except ConnectionError as e:
+        log_verbose("    GW SAPXPG connection error on %s:%d: %s" % (host, port, e))
+        try:
+            sock.close()
+        except Exception:
+            pass
+    except Exception as e:
+        log_verbose("    GW SAPXPG check error on %s:%d: %s" % (host, port, e))
         try:
             sock.close()
         except Exception:
@@ -5501,8 +5514,13 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                 elif "Gateway" in svc_desc:
                     print("[*]   Checking gateway on port %d ..." % port)
                     gw_info = fingerprint_gateway(target_ip, port, timeout)
-                    if gw_info.get("accessible"):
-                        instance.services["gateway"] = {"port": port}
+                    # Always register the gateway service for open 33XX ports.
+                    # The port was confirmed open by the port scanner; the v3
+                    # MONITOR NOOP fingerprint may fail even on a fully
+                    # functional (and vulnerable) gateway — it is a different
+                    # ACL/protocol path than the SAPXPG exploit flow.
+                    # Phase 2 check_gw_sapxpg() will determine exploitability.
+                    instance.services["gateway"] = {"port": port}
 
                     # RFC_SYSTEM_INFO probe — runs on any open 33XX port
                     # (does not require the v3 NOOP monitor to succeed)
@@ -5511,8 +5529,6 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                         try:
                             rfc = probe_sap_system(target_ip, port, timeout=max(timeout, 5))
                             if rfc.get("status") in ("rfc_success", "info_extracted", "partial_info"):
-                                if not gw_info.get("accessible"):
-                                    instance.services["gateway"] = {"port": port}
                                 for key in ("RFCOPSYS", "RFCSAPRL", "RFCDBSYS", "RFCDBHOST",
                                             "RFCKERNRL", "RFCHOST2", "RFCSYSID", "RFCIPADDR"):
                                     val = rfc.get(key, "").strip()
