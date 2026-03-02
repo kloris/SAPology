@@ -618,6 +618,7 @@ class SAPSystem:
     db_type: str = ""
     clients: List[str] = field(default_factory=list)
     clients_redirected: bool = False
+    has_hana: bool = False
     relationships: List[dict] = field(default_factory=list)
 
     def highest_severity(self) -> Optional[Severity]:
@@ -3826,18 +3827,19 @@ def check_cve_2022_41272(host, port, timeout=5):
                 name="CVE-2022-41272: SAP P4 Service Exposed (Unauthenticated Access)",
                 severity=Severity.CRITICAL,
                 description=(
-                    "The SAP P4 service on port %d is accessible without "
-                    "authentication. CVE-2022-41272 (CVSS 9.9) allows "
-                    "unauthenticated attackers to call remote functions in "
-                    "the JMS Connector Service via the P4 protocol, enabling "
-                    "access to and modification of sensitive data. This affects "
-                    "SAP NetWeaver Process Integration (Java Stack)." % port
+                    "The SAP port %d is reachable from the network. This "
+                    "port is mostly used for internal communications and "
+                    "should therefore in many cases not be accessible to "
+                    "end-users. Because it is exposed, unauthenticated "
+                    "attackers could abuse the P4 service for "
+                    "deserialisation issues or other known "
+                    "vulnerabilities." % port
                 ),
                 remediation=(
-                    "Apply SAP Security Note 3267780. Restrict network access "
-                    "to P4 ports (5NN04) using firewall rules so that only "
-                    "authorized application servers can reach them. Consider "
-                    "disabling the P4 service if not required."
+                    "Where possible limit or block access to P4 ports "
+                    "(5NN04) at the firewall level and when needed make "
+                    "sure to use P4S, the secure option. In most cases "
+                    "end-users do not need access to the P4(S) ports."
                 ),
                 detail=detail,
                 port=port,
@@ -3986,6 +3988,13 @@ def generate_svg_topology(landscape):
         pill_svg, pill_w = _system_type_pill_svg(sys_obj.system_type, pill_x, y + 5)
         if pill_svg:
             lines.append(pill_svg)
+
+        # HANA pill badge (after system type pill)
+        if sys_obj.has_hana:
+            hana_x = pill_x + pill_w + 4 if pill_w else pill_x
+            hana_svg, _ = _system_type_pill_svg("HANA", hana_x, y + 5)
+            if hana_svg:
+                lines.append(hana_svg)
 
         # Instance numbers (right-aligned)
         if inst_nrs:
@@ -4189,10 +4198,11 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         meta_str = " | ".join(meta_parts)
 
         type_pill = _system_type_pill_html(sys_obj.system_type)
+        hana_pill = _system_type_pill_html("HANA") if sys_obj.has_hana else ""
 
         system_details += """
         <div class="system-card" style="border-left: 4px solid %s">
-          <h3>%s %s %s</h3>
+          <h3>%s %s %s %s</h3>
           <p class="system-meta">%s</p>
           <table>
             <thead>
@@ -4204,6 +4214,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         """ % (
             border_color,
             type_pill,
+            hana_pill,
             html.escape(sys_obj.sid),
             ("(%s)" % html.escape(sys_obj.hostname)) if sys_obj.hostname else "",
             meta_str,
@@ -5451,7 +5462,10 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                             try:
                                 result = enumerate_clients(target_ip, port, timeout=max(timeout, 5))
                                 if result.get("clients"):
-                                    sys_obj.clients = sorted(result["clients"])
+                                    # Client 000 always exists on every SAP system
+                                    clients = set(result["clients"])
+                                    clients.add("000")
+                                    sys_obj.clients = sorted(clients)
                                     if result.get("redirected"):
                                         sys_obj.clients_redirected = True
                                         print("[*] %s:%d - Client redirection/hardening detected, default client: %s" % (
@@ -5462,7 +5476,9 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                         print("[*] %s:%d - Found %d client(s): %s" % (
                                             target_ip, port, len(sys_obj.clients), ", ".join(sys_obj.clients)))
                                 else:
-                                    print("[*] %s:%d - No clients found" % (target_ip, port))
+                                    # Even if enumeration found nothing, client 000 always exists
+                                    sys_obj.clients = ["000"]
+                                    print("[*] %s:%d - Client 000 (always present)" % (target_ip, port))
                             except Exception:
                                 pass
 
@@ -5659,8 +5675,17 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     break
             if type_parts:
                 sys_obj.system_type = "+".join(type_parts)
+        # Detect HANA database ports (3NN13/3NN15) — shown as additional pill
+        for inst in sys_obj.instances:
+            for desc in inst.ports.values():
+                if "HANA SQL" in desc:
+                    sys_obj.has_hana = True
+                    break
+            if sys_obj.has_hana:
+                break
         if sys_obj.system_type:
-            print("[*]   System type detected: %s" % sys_obj.system_type)
+            print("[*]   System type detected: %s%s" % (
+                sys_obj.system_type, " + HANA" if sys_obj.has_hana else ""))
 
         # Skip non-SAP systems: if no kernel version was identified and SID is
         # still UNKNOWN, the host has no confirmed SAP services (e.g. generic

@@ -398,13 +398,17 @@ def _check_client_redirection(host, port, timeout=5):
     authenticate against the default client. This makes per-client enumeration
     impossible — every client returns "Name or password is incorrect".
 
-    Detection: probe 5 unlikely client numbers (990-994). If ALL return
-    "available" (no "Client not available" error), the system is redirecting.
+    Detection: probe 5 unlikely client numbers (990-994). If ALL successful
+    probes return "available" (no "Client not available" error) and at least 3
+    probes succeeded, the system is redirecting. Failed probes (connection
+    errors, timeouts) are tolerated — they do not abort the check.
 
     Returns: (is_redirecting, default_client_str_or_None, init_resp_bytes)
     """
     test_clients = [990, 991, 992, 993, 994]
     init_resp = None
+    succeeded = 0
+    client_validated = False  # True if server returned "client not available"
 
     for test_nr in test_clients:
         test_client = "%03d" % test_nr
@@ -417,7 +421,7 @@ def _check_client_redirection(host, port, timeout=5):
             ni_send(sock, build_diag_init())
             resp = ni_recv(sock, timeout)
             if not resp or len(resp) < 100:
-                return (False, None, None)  # can't determine, assume no redirect
+                continue  # probe failed, skip to next
             if init_resp is None:
                 init_resp = resp
 
@@ -426,16 +430,21 @@ def _check_client_redirection(host, port, timeout=5):
             ni_send(sock, login_pkt)
             resp2 = ni_recv(sock, timeout + 2)
             if not resp2:
-                return (False, None, init_resp)
+                continue  # probe failed, skip to next
+
+            succeeded += 1
 
             # If server reports "client not available" for ANY test client,
             # the system validates clients properly → no redirection
             for pat in CLIENT_UNAVAILABLE_RE:
                 if pat.search(resp2):
-                    return (False, None, init_resp)
+                    client_validated = True
+                    break
+            if client_validated:
+                break
 
         except Exception:
-            return (False, None, init_resp)
+            continue  # probe failed, skip to next
         finally:
             if sock:
                 try:
@@ -443,9 +452,17 @@ def _check_client_redirection(host, port, timeout=5):
                 except Exception:
                     pass
 
-    # All 5 test clients returned "available" → redirection is very likely
-    default_client = _extract_default_client(init_resp) if init_resp else None
-    return (True, default_client, init_resp)
+    if client_validated:
+        return (False, None, init_resp)
+
+    # If at least 3 probes succeeded and none returned "client not available",
+    # the system is very likely redirecting
+    if succeeded >= 3:
+        default_client = _extract_default_client(init_resp) if init_resp else None
+        return (True, default_client, init_resp)
+
+    # Too few successful probes to determine — assume no redirection
+    return (False, None, init_resp)
 
 
 # ============================================================================
@@ -586,8 +603,11 @@ def enumerate_clients(host, port, timeout=5, max_workers=20,
         print("      'Client not available', making per-client enumeration impossible.")
         print("      Default client from login screen: %s" % (default_client or "unknown"))
         print("      Note: other clients may exist but cannot be detected via DIAG.")
+        clients = set()
+        clients.add("000")  # Client 000 always exists on every SAP system
         if default_client:
-            result["clients"] = [default_client]
+            clients.add(default_client)
+        result["clients"] = sorted(clients)
         result["redirected"] = True
         result["probed"] = 5  # calibration probes
         return result
@@ -621,6 +641,35 @@ def enumerate_clients(host, port, timeout=5, max_workers=20,
                               (client_str, detail))
             except Exception:
                 result["errors"] += 1
+
+    # Sanity check: if an implausible number of clients were found (>100),
+    # the redirection check likely failed and the server is actually redirecting
+    # all logins to a default client. Override with redirection result.
+    if len(found) > 100:
+        print("  [!] %d clients reported as available — this indicates client" % len(found))
+        print("      redirection/hardening (server never returns 'Client not available').")
+        # Re-extract default client from a fresh init
+        default_client = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((host, port))
+            ni_send(sock, build_diag_init())
+            resp = ni_recv(sock, timeout)
+            sock.close()
+            if resp:
+                default_client = _extract_default_client(resp)
+        except Exception:
+            pass
+        print("      Default client from login screen: %s" % (default_client or "unknown"))
+        print("      Note: other clients may exist but cannot be detected via DIAG.")
+        clients = set()
+        clients.add("000")
+        if default_client:
+            clients.add(default_client)
+        result["clients"] = sorted(clients)
+        result["redirected"] = True
+        return result
 
     result["clients"] = sorted(found)
     return result
