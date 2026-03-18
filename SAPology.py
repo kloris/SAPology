@@ -230,9 +230,6 @@ SAP_FIXED_PORTS = {
     59950: "SAP MDM Server",
     59750: "SAP MDM Import Server",
     44300: "SAP Web Dispatcher HTTPS",
-    7210:  "MaxDB X Server",
-    1433:  "MSSQL",
-    1521:  "Oracle DB Listener",
 }
 
 # Well-known non-SAP ports that collide with SAP port formulas.
@@ -621,11 +618,6 @@ class SAPSystem:
     db_type: str = ""
     clients: List[str] = field(default_factory=list)
     clients_redirected: bool = False
-    has_hana: bool = False
-    has_maxdb: bool = False
-    has_mssql: bool = False
-    has_oracle: bool = False
-    has_db2: bool = False
     relationships: List[dict] = field(default_factory=list)
 
     def highest_severity(self) -> Optional[Severity]:
@@ -1538,150 +1530,6 @@ def fingerprint_saprouter(host, port, timeout=3):
         except (socket.error, OSError):
             pass
 
-    return info
-
-
-def fingerprint_maxdb(host, port, timeout=3):
-    """Fingerprint SAP MaxDB X Server on port 7210.
-
-    Sends a short packet and checks for the MaxDB "Rejected bad connect packet"
-    response, which confirms the service is a MaxDB X Server.
-    """
-    info = {"accessible": False, "confirmed": False}
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        info["accessible"] = True
-        # Send a minimal probe — MaxDB X Server responds with an error message
-        sock.sendall(b"\x00\x00\x00\x04TEST")
-        resp = b""
-        try:
-            resp = sock.recv(4096)
-        except socket.timeout:
-            pass
-        sock.close()
-        if resp and b"Rejected bad connect packet" in resp:
-            info["confirmed"] = True
-            info["detail"] = "MaxDB X Server confirmed on port %d" % port
-        elif resp:
-            info["detail"] = "Port %d responded (%d bytes)" % (port, len(resp))
-        else:
-            info["detail"] = "Port %d open (no response to probe)" % port
-    except (socket.error, OSError):
-        pass
-    return info
-
-
-def fingerprint_mssql(host, port, timeout=3):
-    """Fingerprint Microsoft SQL Server using TDS PreLogin probe.
-
-    Sends a TDS PreLogin packet (same as nmap ms-sql-s probe) and checks
-    if the response starts with 0x04 0x01 (TDS response header).
-    """
-    info = {"accessible": False, "confirmed": False}
-    # TDS PreLogin packet (from nmap ms-sql-s probe)
-    tds_prelogin = (
-        b"\x12\x01\x00\x34\x00\x00\x00\x00\x00\x00\x15\x00\x06\x01"
-        b"\x00\x1b\x00\x01\x02\x00\x1c\x00\x0c\x03\x00\x28\x00\x04"
-        b"\xff\x08\x00\x01\x55\x00\x00\x00\x4d\x53\x53\x51\x4c\x53"
-        b"\x65\x72\x76\x65\x72\x00\x48\x0f\x00\x00"
-    )
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        info["accessible"] = True
-        sock.sendall(tds_prelogin)
-        resp = b""
-        try:
-            resp = sock.recv(4096)
-        except socket.timeout:
-            pass
-        sock.close()
-        if resp and len(resp) >= 2 and resp[0] == 0x04 and resp[1] == 0x01:
-            info["confirmed"] = True
-            info["detail"] = "MSSQL TDS service confirmed on port %d" % port
-        elif resp:
-            info["detail"] = "Port %d responded (%d bytes)" % (port, len(resp))
-        else:
-            info["detail"] = "Port %d open (no response to probe)" % port
-    except (socket.error, OSError):
-        pass
-    return info
-
-
-def fingerprint_oracle(host, port, timeout=3):
-    """Fingerprint Oracle Database TNS Listener.
-
-    Sends a TNS Connect version command (same as nmap oracle-tns probe) and
-    checks for TNS response signatures (TNSLSNR, DESCRIPTION, TNS header).
-    """
-    info = {"accessible": False, "confirmed": False}
-    # TNS Connect version probe (from nmap oracle-tns probe)
-    tns_probe = (
-        b"\x00\x5a\x00\x00\x01\x00\x00\x00\x01\x36\x01\x2c\x00\x00"
-        b"\x08\x00\x7f\xff\x7f\x08\x00\x00\x00\x01\x00\x20\x00\x3a"
-        b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-        b"\x00\x00\x34\xe6\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
-        b"\x00\x00(CONNECT_DATA=(COMMAND=version))"
-    )
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        info["accessible"] = True
-        sock.sendall(tns_probe)
-        resp = b""
-        try:
-            resp = sock.recv(4096)
-        except socket.timeout:
-            pass
-        sock.close()
-        if resp and len(resp) >= 4:
-            # TNS Accept (0x02) or Refuse (0x04) response
-            if resp[4] in (0x02, 0x04):
-                info["confirmed"] = True
-            if b"TNSLSNR" in resp:
-                info["confirmed"] = True
-                m = re.search(rb"TNSLSNR for ([^:]+): Version ([\d.]+)", resp)
-                if m:
-                    info["platform"] = m.group(1).decode(errors="replace")
-                    info["version"] = m.group(2).decode(errors="replace")
-            elif b"DESCRIPTION" in resp:
-                info["confirmed"] = True
-            if info["confirmed"]:
-                detail = "Oracle TNS Listener confirmed on port %d" % port
-                if info.get("version"):
-                    detail += " (version %s)" % info["version"]
-                info["detail"] = detail
-            else:
-                info["detail"] = "Port %d responded (%d bytes)" % (port, len(resp))
-        elif resp:
-            info["detail"] = "Port %d responded (%d bytes)" % (port, len(resp))
-        else:
-            info["detail"] = "Port %d open (no response to probe)" % port
-    except (socket.error, OSError):
-        pass
-    return info
-
-
-def fingerprint_db2(host, port, timeout=3):
-    """Fingerprint IBM DB2 via TCP connect on port 50000.
-
-    DB2 uses the DRDA protocol which is complex to probe. A TCP connect
-    confirmation on port 50000 in an SAP context is sufficient for detection.
-    """
-    info = {"accessible": False, "confirmed": False}
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        info["accessible"] = True
-        info["detail"] = "IBM DB2 port %d open" % port
-        sock.close()
-    except (socket.error, OSError):
-        pass
     return info
 
 
@@ -2700,20 +2548,7 @@ def check_gw_sapxpg(host, port, sid, hostname, command, timeout=5, instance=None
             )
 
         sock.close()
-    except socket.timeout:
-        log_verbose("    GW SAPXPG check timed out on %s:%d" % (host, port))
-        try:
-            sock.close()
-        except Exception:
-            pass
-    except ConnectionError as e:
-        log_verbose("    GW SAPXPG connection error on %s:%d: %s" % (host, port, e))
-        try:
-            sock.close()
-        except Exception:
-            pass
-    except Exception as e:
-        log_verbose("    GW SAPXPG check error on %s:%d: %s" % (host, port, e))
+    except Exception:
         try:
             sock.close()
         except Exception:
@@ -3991,19 +3826,18 @@ def check_cve_2022_41272(host, port, timeout=5):
                 name="CVE-2022-41272: SAP P4 Service Exposed (Unauthenticated Access)",
                 severity=Severity.CRITICAL,
                 description=(
-                    "The SAP port %d is reachable from the network. This "
-                    "port is mostly used for internal communications and "
-                    "should therefore in many cases not be accessible to "
-                    "end-users. Because it is exposed, unauthenticated "
-                    "attackers could abuse the P4 service for "
-                    "deserialisation issues or other known "
-                    "vulnerabilities." % port
+                    "The SAP P4 service on port %d is accessible without "
+                    "authentication. CVE-2022-41272 (CVSS 9.9) allows "
+                    "unauthenticated attackers to call remote functions in "
+                    "the JMS Connector Service via the P4 protocol, enabling "
+                    "access to and modification of sensitive data. This affects "
+                    "SAP NetWeaver Process Integration (Java Stack)." % port
                 ),
                 remediation=(
-                    "Where possible limit or block access to P4 ports "
-                    "(5NN04) at the firewall level and when needed make "
-                    "sure to use P4S, the secure option. In most cases "
-                    "end-users do not need access to the P4(S) ports."
+                    "Apply SAP Security Note 3267780. Restrict network access "
+                    "to P4 ports (5NN04) using firewall rules so that only "
+                    "authorized application servers can reach them. Consider "
+                    "disabling the P4 service if not required."
                 ),
                 detail=detail,
                 port=port,
@@ -4030,10 +3864,6 @@ def _system_type_pill_html(system_type):
         "SAPROUTER":       ("#788fa6", "Router",   '<path d="M2,6 L6,2 L10,6 L6,10 Z" fill="none" stroke="white" stroke-width="1.3"/>'),
         "MDM":             ("#5d36ff", "MDM",      '<rect x="1" y="1" width="4" height="4" rx="0.5" fill="white"/><rect x="7" y="1" width="4" height="4" rx="0.5" fill="white"/><rect x="1" y="7" width="4" height="4" rx="0.5" fill="white"/><rect x="7" y="7" width="4" height="4" rx="0.5" fill="white"/>'),
         "HANA":            ("#aa0808", "HANA",     '<rect x="1" y="5" width="2" height="7" fill="white"/><rect x="5" y="2" width="2" height="10" fill="white"/><rect x="9" y="0" width="2" height="12" fill="white"/>'),
-        "MAXDB":           ("#e07900", "MaxDB",    '<circle cx="6" cy="6" r="5" fill="none" stroke="white" stroke-width="1.5"/><circle cx="6" cy="6" r="1.5" fill="white"/>'),
-        "MSSQL":           ("#2f5ea0", "MSSQL",    '<rect x="1" y="1" width="10" height="10" rx="2" fill="none" stroke="white" stroke-width="1.2"/><line x1="1" y1="4" x2="11" y2="4" stroke="white" stroke-width="1"/><line x1="1" y1="7" x2="11" y2="7" stroke="white" stroke-width="1"/>'),
-        "ORACLE":          ("#c74634", "Oracle",   '<circle cx="6" cy="6" r="5" fill="none" stroke="white" stroke-width="1.5"/><line x1="3" y1="6" x2="9" y2="6" stroke="white" stroke-width="1"/>'),
-        "DB2":             ("#054ada", "DB2",      '<rect x="1" y="1" width="10" height="4" rx="1" fill="none" stroke="white" stroke-width="1"/><rect x="1" y="7" width="10" height="4" rx="1" fill="none" stroke="white" stroke-width="1"/>'),
     }
     if t == "ABAP+JAVA":
         color, label, svg = _MAP[t]
@@ -4063,10 +3893,6 @@ def _system_type_pill_svg(system_type, x, y):
         "SAPROUTER":       ("#788fa6", "Router", 56),
         "MDM":             ("#5d36ff", "MDM", 44),
         "HANA":            ("#aa0808", "HANA", 52),
-        "MAXDB":           ("#e07900", "MaxDB", 56),
-        "MSSQL":           ("#2f5ea0", "MSSQL", 56),
-        "ORACLE":          ("#c74634", "Oracle", 56),
-        "DB2":             ("#054ada", "DB2", 42),
     }
     if t not in _MAP:
         if not t:
@@ -4160,17 +3986,6 @@ def generate_svg_topology(landscape):
         pill_svg, pill_w = _system_type_pill_svg(sys_obj.system_type, pill_x, y + 5)
         if pill_svg:
             lines.append(pill_svg)
-
-        # Database pill badges (after system type pill)
-        db_pill_x = pill_x + pill_w + 4 if pill_w else pill_x
-        for db_attr, db_key in [("has_hana", "HANA"), ("has_maxdb", "MAXDB"),
-                                ("has_mssql", "MSSQL"), ("has_oracle", "ORACLE"),
-                                ("has_db2", "DB2")]:
-            if getattr(sys_obj, db_attr):
-                db_svg, db_w = _system_type_pill_svg(db_key, db_pill_x, y + 5)
-                if db_svg:
-                    lines.append(db_svg)
-                    db_pill_x += db_w + 4
 
         # Instance numbers (right-aligned)
         if inst_nrs:
@@ -4374,16 +4189,10 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         meta_str = " | ".join(meta_parts)
 
         type_pill = _system_type_pill_html(sys_obj.system_type)
-        db_pills = ""
-        for db_attr, db_key in [("has_hana", "HANA"), ("has_maxdb", "MAXDB"),
-                                ("has_mssql", "MSSQL"), ("has_oracle", "ORACLE"),
-                                ("has_db2", "DB2")]:
-            if getattr(sys_obj, db_attr):
-                db_pills += _system_type_pill_html(db_key)
 
         system_details += """
         <div class="system-card" style="border-left: 4px solid %s">
-          <h3>%s %s %s %s</h3>
+          <h3>%s %s %s</h3>
           <p class="system-meta">%s</p>
           <table>
             <thead>
@@ -4395,7 +4204,6 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         """ % (
             border_color,
             type_pill,
-            db_pills,
             html.escape(sys_obj.sid),
             ("(%s)" % html.escape(sys_obj.hostname)) if sys_obj.hostname else "",
             meta_str,
@@ -5102,39 +4910,15 @@ def parse_instance_range(range_str):
 
 
 def _check_host_alive(host, timeout=2):
-    """Quick reachability check via ICMP ping, with TCP port fallback.
-
-    Tries ICMP ping first (fastest). If ping fails (many hosts block ICMP),
-    falls back to TCP connect probes on common SAP port ranges.
-    A TCP connect returning 'open' or 'refused' proves the host is up.
-    """
-    # Primary: ICMP ping
+    """Quick reachability check via ICMP ping."""
     try:
         result = subprocess.run(
             ["ping", "-c", "1", "-W", str(timeout), host],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=timeout + 1)
-        if result.returncode == 0:
-            return True
+        return result.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
-        pass
-    # Fallback: TCP probe on common SAP port ranges
-    probe_ports = (
-        list(range(3200, 3300)) + list(range(3300, 3311)) +
-        [8000, 8443, 50013, 443, 1128, 1129]
-    )
-    for port in probe_ports:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(timeout)
-            result = s.connect_ex((host, port))
-            s.close()
-            # 0 = open, 111 = connection refused — both mean host is alive
-            if result in (0, 111):
-                return True
-        except (OSError, socket.timeout):
-            continue
-    return False
+        return False
 
 
 def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
@@ -5388,9 +5172,12 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                 instance.info["sc_%s" % key] = val
                         # Extract SID from SAPSYSTEMNAME property
                         sysname = p.get("SAPSYSTEMNAME", "")
-                        if sysname and not sid_found:
-                            sys_obj.sid = sysname.strip()
-                            sid_found = True
+                        if sysname:
+                            if "_discovered_sid" not in instance.info:
+                                instance.info["_discovered_sid"] = sysname.strip()
+                            if not sid_found:
+                                sys_obj.sid = sysname.strip()
+                                sid_found = True
                         syslist = query_sapcontrol_system_instances(target_ip, port, use_ssl, timeout)
                         if syslist.get("success") and syslist.get("properties"):
                             sp = syslist["properties"]
@@ -5406,6 +5193,8 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                 if isinstance(prop_val, str) and "_" in prop_val:
                                     parts = prop_val.split("_")
                                     if len(parts) >= 3 and len(parts[-2]) == 3 and parts[-2].isupper():
+                                        if "_discovered_sid" not in instance.info:
+                                            instance.info["_discovered_sid"] = parts[-2]
                                         if not sid_found:
                                             sys_obj.sid = parts[-2]
                                             sid_found = True
@@ -5441,9 +5230,12 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                 instance.info[key] = pub_info[key]
                         # Extract SID
                         sid_val = pub_info.get("RFCSYSID", pub_info.get("SAPSYSTEMNAME", ""))
-                        if sid_val and not sid_found:
-                            sys_obj.sid = sid_val.strip()
-                            sid_found = True
+                        if sid_val:
+                            if "_discovered_sid" not in instance.info:
+                                instance.info["_discovered_sid"] = sid_val.strip()
+                            if not sid_found:
+                                sys_obj.sid = sid_val.strip()
+                                sid_found = True
                         # Extract hostname from RFCDEST (format: hostname_SID_NN)
                         rfcdest = pub_info.get("RFCDEST", "")
                         if "_" in rfcdest:
@@ -5514,13 +5306,8 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                 elif "Gateway" in svc_desc:
                     print("[*]   Checking gateway on port %d ..." % port)
                     gw_info = fingerprint_gateway(target_ip, port, timeout)
-                    # Always register the gateway service for open 33XX ports.
-                    # The port was confirmed open by the port scanner; the v3
-                    # MONITOR NOOP fingerprint may fail even on a fully
-                    # functional (and vulnerable) gateway — it is a different
-                    # ACL/protocol path than the SAPXPG exploit flow.
-                    # Phase 2 check_gw_sapxpg() will determine exploitability.
-                    instance.services["gateway"] = {"port": port}
+                    if gw_info.get("accessible"):
+                        instance.services["gateway"] = {"port": port}
 
                     # RFC_SYSTEM_INFO probe — runs on any open 33XX port
                     # (does not require the v3 NOOP monitor to succeed)
@@ -5529,6 +5316,8 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                         try:
                             rfc = probe_sap_system(target_ip, port, timeout=max(timeout, 5))
                             if rfc.get("status") in ("rfc_success", "info_extracted", "partial_info"):
+                                if not gw_info.get("accessible"):
+                                    instance.services["gateway"] = {"port": port}
                                 for key in ("RFCOPSYS", "RFCSAPRL", "RFCDBSYS", "RFCDBHOST",
                                             "RFCKERNRL", "RFCHOST2", "RFCSYSID", "RFCIPADDR"):
                                     val = rfc.get(key, "").strip()
@@ -5551,9 +5340,12 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                 if rfc_dbsys and not sys_obj.db_type:
                                     sys_obj.db_type = rfc_dbsys
                                 rfc_sid = rfc.get("RFCSYSID", "").strip()
-                                if rfc_sid and len(rfc_sid) == 3 and not sid_found:
-                                    sys_obj.sid = rfc_sid
-                                    sid_found = True
+                                if rfc_sid and len(rfc_sid) == 3:
+                                    if "_discovered_sid" not in instance.info:
+                                        instance.info["_discovered_sid"] = rfc_sid
+                                    if not sid_found:
+                                        sys_obj.sid = rfc_sid
+                                        sid_found = True
                                 # Fallback from gateway error parsing (partial info)
                                 if not sys_obj.hostname and rfc.get("hostname"):
                                     sys_obj.hostname = rfc["hostname"]
@@ -5563,11 +5355,14 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                     sys_obj.os_type = rfc["os_hint"]
                                 if not sys_obj.sap_release and rfc.get("sap_release_approx"):
                                     sys_obj.sap_release = rfc["sap_release_approx"]
-                                if not sid_found and rfc.get("sap_sid"):
+                                if rfc.get("sap_sid"):
                                     sid_val = rfc["sap_sid"].strip()
                                     if len(sid_val) == 3:
-                                        sys_obj.sid = sid_val
-                                        sid_found = True
+                                        if "_discovered_sid" not in instance.info:
+                                            instance.info["_discovered_sid"] = sid_val
+                                        if not sid_found:
+                                            sys_obj.sid = sid_val
+                                            sid_found = True
                         except Exception:
                             pass
 
@@ -5598,6 +5393,8 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                     parts = name.split("_")
                                     if len(parts) >= 3:
                                         srv_sid = parts[-2]
+                                        if "_discovered_sid" not in instance.info:
+                                            instance.info["_discovered_sid"] = srv_sid
                                         if not sid_found:
                                             sys_obj.sid = srv_sid
                                             sid_found = True
@@ -5626,9 +5423,10 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                     instance.info["diag_%s" % dk] = dv
                             # Extract SID from DIAG if not already found
                             diag_dbname = diag_info.get("DBNAME", "")
-                            if diag_dbname and not sid_found:
-                                # DBNAME is often the SID itself
-                                if len(diag_dbname) == 3 and diag_dbname.isupper():
+                            if diag_dbname and len(diag_dbname) == 3 and diag_dbname.isupper():
+                                if "_discovered_sid" not in instance.info:
+                                    instance.info["_discovered_sid"] = diag_dbname
+                                if not sid_found:
                                     sys_obj.sid = diag_dbname
                                     sid_found = True
                             # Extract kernel from DIAG
@@ -5646,10 +5444,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                             try:
                                 result = enumerate_clients(target_ip, port, timeout=max(timeout, 5))
                                 if result.get("clients"):
-                                    # Client 000 always exists on every SAP system
-                                    clients = set(result["clients"])
-                                    clients.add("000")
-                                    sys_obj.clients = sorted(clients)
+                                    sys_obj.clients = sorted(result["clients"])
                                     if result.get("redirected"):
                                         sys_obj.clients_redirected = True
                                         print("[*] %s:%d - Client redirection/hardening detected, default client: %s" % (
@@ -5660,9 +5455,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                                         print("[*] %s:%d - Found %d client(s): %s" % (
                                             target_ip, port, len(sys_obj.clients), ", ".join(sys_obj.clients)))
                                 else:
-                                    # Even if enumeration found nothing, client 000 always exists
-                                    sys_obj.clients = ["000"]
-                                    print("[*] %s:%d - Client 000 (always present)" % (target_ip, port))
+                                    print("[*] %s:%d - No clients found" % (target_ip, port))
                             except Exception:
                                 pass
 
@@ -5859,41 +5652,8 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     break
             if type_parts:
                 sys_obj.system_type = "+".join(type_parts)
-        # Detect database ports — shown as additional pill badges
-        _db_port_map = {
-            "HANA SQL": "has_hana",
-            "MaxDB X Server": "has_maxdb",
-            "MSSQL": "has_mssql",
-            "Oracle DB Listener": "has_oracle",
-            "IBM DB2": "has_db2",
-        }
-        for inst in sys_obj.instances:
-            for desc in inst.ports.values():
-                for db_key, db_attr in _db_port_map.items():
-                    if db_key in desc and not getattr(sys_obj, db_attr):
-                        setattr(sys_obj, db_attr, True)
-        # Also infer DB type from RFCDBSYS if no DB port was found
-        if sys_obj.db_type:
-            dt = sys_obj.db_type.upper()
-            if "HDB" in dt or "HANA" in dt:
-                sys_obj.has_hana = True
-            elif "ADA" in dt or "MAXDB" in dt:
-                sys_obj.has_maxdb = True
-            elif "MSS" in dt:
-                sys_obj.has_mssql = True
-            elif "ORA" in dt:
-                sys_obj.has_oracle = True
-            elif "DB2" in dt or "DB6" in dt:
-                sys_obj.has_db2 = True
-        _db_labels = []
-        for label, attr in [("HANA", "has_hana"), ("MaxDB", "has_maxdb"),
-                            ("MSSQL", "has_mssql"), ("Oracle", "has_oracle"),
-                            ("DB2", "has_db2")]:
-            if getattr(sys_obj, attr):
-                _db_labels.append(label)
         if sys_obj.system_type:
-            db_suffix = " + " + "/".join(_db_labels) if _db_labels else ""
-            print("[*]   System type detected: %s%s" % (sys_obj.system_type, db_suffix))
+            print("[*]   System type detected: %s" % sys_obj.system_type)
 
         # Skip non-SAP systems: if no kernel version was identified and SID is
         # still UNKNOWN, the host has no confirmed SAP services (e.g. generic
@@ -5905,7 +5665,54 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     target_ip, sys_obj.hostname))
                 continue
 
-        landscape.append(sys_obj)
+        # Group instances by their discovered SID to separate multiple SAP
+        # systems running on the same host (e.g. AED instances 00,01 and AEQ
+        # instances 02,03 on the same IP).
+        sid_groups = {}
+        for inst in sys_obj.instances:
+            inst_sid = inst.info.get("_discovered_sid", sys_obj.sid)
+            if inst_sid not in sid_groups:
+                sid_groups[inst_sid] = []
+            sid_groups[inst_sid].append(inst)
+
+        if len(sid_groups) <= 1:
+            # Single system (common case) — keep as-is
+            landscape.append(sys_obj)
+        else:
+            # Multiple SAP systems on the same host — split into separate
+            # SAPSystem objects so each is reported independently.
+            for sid, instances in sid_groups.items():
+                new_sys = SAPSystem(
+                    sid=sid,
+                    hostname=sys_obj.hostname,
+                    instances=instances,
+                    kernel=sys_obj.kernel,
+                    system_type=sys_obj.system_type,
+                    os_type=sys_obj.os_type,
+                    sap_release=sys_obj.sap_release,
+                    db_type=sys_obj.db_type,
+                    clients=list(sys_obj.clients),
+                    relationships=[r for r in sys_obj.relationships
+                                   if r.get("sid", "") == sid or r.get("sid", "") == ""],
+                )
+                # Override system-level properties from this group's instances
+                # when available, since they may differ between systems.
+                for inst in instances:
+                    kr = inst.info.get("kernel_release", inst.info.get("KERNEL_VERSION", ""))
+                    if kr and not new_sys.kernel:
+                        new_sys.kernel = kr
+                    os_val = inst.info.get("RFCOPSYS", inst.info.get("sc_RFCOPSYS", ""))
+                    if os_val and not new_sys.os_type:
+                        new_sys.os_type = os_val
+                    sr = inst.info.get("RFCSAPRL", inst.info.get("sc_RFCSAPRL", ""))
+                    if sr and not new_sys.sap_release:
+                        new_sys.sap_release = sr
+                    db = inst.info.get("RFCDBSYS", inst.info.get("sc_RFCDBSYS", ""))
+                    if db and not new_sys.db_type:
+                        new_sys.db_type = db
+                landscape.append(new_sys)
+                print("[*]   Separated SAP system %s with instances: %s" % (
+                    sid, ", ".join(i.instance_nr for i in instances)))
 
     return landscape
 
@@ -6003,11 +5810,6 @@ def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
             # HANA SQL ports
             for p, desc in inst.ports.items():
                 if "HANA SQL" in desc:
-                    total_checks += 1
-            # Database ports (MaxDB, MSSQL, Oracle, DB2)
-            _db_descs = ("MaxDB X Server", "MSSQL", "Oracle DB Listener", "IBM DB2")
-            for p, desc in inst.ports.items():
-                if desc in _db_descs:
                     total_checks += 1
             # SSL/TLS ports — count every unique port that will be checked
             _ssl_count_ports = set()
@@ -6435,46 +6237,6 @@ def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
                                 "segments." % p
                             ),
                             detail="TCP port %d (%s) open on %s" % (p, desc, inst.ip),
-                            port=p,
-                        ))
-                        step()
-
-                # Database port exposure checks (MaxDB, MSSQL, Oracle, DB2)
-                _db_checks = {
-                    "MaxDB X Server": ("MaxDB", fingerprint_maxdb),
-                    "MSSQL": ("MSSQL", fingerprint_mssql),
-                    "Oracle DB Listener": ("Oracle DB", fingerprint_oracle),
-                    "IBM DB2": ("IBM DB2", fingerprint_db2),
-                }
-                for p, desc in sorted(inst.ports.items()):
-                    if cancelled():
-                        break
-                    if desc in _db_checks:
-                        db_label, db_fp_func = _db_checks[desc]
-                        log_verbose("  %s port %d exposed on %s" % (db_label, p, inst.ip))
-                        fp = db_fp_func(inst.ip, p, timeout)
-                        detail = fp.get("detail", "TCP port %d open on %s" % (p, inst.ip))
-                        if fp.get("confirmed"):
-                            detail += " (service confirmed)"
-                        inst.findings.append(Finding(
-                            name="Database Port Exposed (%s)" % db_label,
-                            severity=Severity.LOW,
-                            description=(
-                                "The %s database port %d is accessible from the "
-                                "scanning host. Database ports are internal service "
-                                "ports that in many cases should be firewalled and "
-                                "only accessible to a specific group of users and "
-                                "machines (e.g. application servers, database "
-                                "administrators)." % (db_label, p)
-                            ),
-                            remediation=(
-                                "Restrict access to %s port %d using firewall rules "
-                                "so that only authorized application servers and DBA "
-                                "workstations can reach it. The port should not be "
-                                "accessible from untrusted networks or general user "
-                                "segments." % (db_label, p)
-                            ),
-                            detail=detail,
                             port=p,
                         ))
                         step()
@@ -7538,7 +7300,6 @@ vulnerability checks (on-premises):
   BO CMS port exposed        --           CMS port reachable (CVE-2026-0485/0490)
   Cloud Connector exposed    --           Administration port accessible from network
   HANA SQL port exposed      --           Database ports accessible from network
-  Database port exposed      --           MaxDB/MSSQL/Oracle/DB2 ports accessible
   SSL/TLS weaknesses         --           SSLv3, TLS 1.0/1.1, self-signed certificates
   HTTP verb tampering        --           Authentication bypass via HEAD/OPTIONS
   Info disclosure            --           /sap/public/info exposing system details
