@@ -3823,15 +3823,14 @@ def check_cve_2022_41272(host, port, timeout=5):
                 detail += ", internal IP: %s" % internal_ip
 
             finding = Finding(
-                name="CVE-2022-41272: SAP P4 Service Exposed (Unauthenticated Access)",
+                name="SAP P4 Service Exposed (Unauthenticated Access)",
                 severity=Severity.CRITICAL,
                 description=(
-                    "The SAP P4 service on port %d is accessible without "
-                    "authentication. CVE-2022-41272 (CVSS 9.9) allows "
-                    "unauthenticated attackers to call remote functions in "
-                    "the JMS Connector Service via the P4 protocol, enabling "
-                    "access to and modification of sensitive data. This affects "
-                    "SAP NetWeaver Process Integration (Java Stack)." % port
+                    "The SAP P4 service on port %d is accessible from the "
+                    "network. The P4 service behind this port had several "
+                    "critical vulnerabilitities in the past and should in most "
+                    "cases not be accessible from the general (enduser) "
+                    "network." % port
                 ),
                 remediation=(
                     "Apply SAP Security Note 3267780. Restrict network access "
