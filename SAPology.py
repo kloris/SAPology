@@ -6243,6 +6243,50 @@ def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
                 if cancelled():
                     break
 
+                # Non-SSL HTTP service exposure check
+                # Ports fingerprinted as actually requiring SSL are excluded (no false positives)
+                ssl_confirmed_ports = set()
+                for svc_data in inst.services.values():
+                    if isinstance(svc_data, dict) and svc_data.get("ssl") and svc_data.get("port"):
+                        ssl_confirmed_ports.add(svc_data["port"])
+
+                non_ssl_http_ports = [
+                    (p, desc) for p, desc in sorted(inst.ports.items())
+                    if "HTTP" in desc and "HTTPS" not in desc
+                    and p not in ssl_confirmed_ports
+                ]
+
+                if non_ssl_http_ports:
+                    port_list_str = ", ".join(
+                        "%d (%s)" % (p, desc) for p, desc in non_ssl_http_ports
+                    )
+                    inst.findings.append(Finding(
+                        name="Unencrypted SAP HTTP Service Exposed",
+                        severity=Severity.HIGH,
+                        description=(
+                            "One or more SAP services are accessible over unencrypted "
+                            "HTTP on port(s) %s. In modern SAP landscapes all services "
+                            "should use SSL/TLS to protect credentials and session "
+                            "tokens from network interception. Unencrypted HTTP "
+                            "services should not be accessible from the general "
+                            "(end-user) network." % port_list_str
+                        ),
+                        remediation=(
+                            "Enable SSL/TLS on all SAP HTTP services. Configure "
+                            "icm/server_port_X to use HTTPS only and disable plain "
+                            "HTTP ports. Apply SAP Note 510007 for SSL setup guidance. "
+                            "Restrict any remaining non-SSL ports via firewall until "
+                            "they can be disabled."
+                        ),
+                        detail="Non-SSL HTTP port(s): %s" % ", ".join(
+                            str(p) for p, _ in non_ssl_http_ports
+                        ),
+                        port=non_ssl_http_ports[0][0],
+                    ))
+
+                if cancelled():
+                    break
+
                 # SSL/TLS version checks on every HTTPS port
                 ssl_checked = set()
                 # Collect ports to check: anything with "HTTPS" in description
