@@ -5681,11 +5681,11 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
         else:
             # Multiple SAP systems on the same host — split into separate
             # SAPSystem objects so each is reported independently.
-            for sid, instances in sid_groups.items():
+            for sid, inst_group in sid_groups.items():
                 new_sys = SAPSystem(
                     sid=sid,
                     hostname=sys_obj.hostname,
-                    instances=instances,
+                    instances=inst_group,
                     kernel=sys_obj.kernel,
                     system_type=sys_obj.system_type,
                     os_type=sys_obj.os_type,
@@ -5697,7 +5697,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                 )
                 # Override system-level properties from this group's instances
                 # when available, since they may differ between systems.
-                for inst in instances:
+                for inst in inst_group:
                     kr = inst.info.get("kernel_release", inst.info.get("KERNEL_VERSION", ""))
                     if kr and not new_sys.kernel:
                         new_sys.kernel = kr
@@ -5712,7 +5712,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                         new_sys.db_type = db
                 landscape.append(new_sys)
                 print("[*]   Separated SAP system %s with instances: %s" % (
-                    sid, ", ".join(i.instance_nr for i in instances)))
+                    sid, ", ".join(i.instance_nr for i in inst_group)))
 
     return landscape
 
