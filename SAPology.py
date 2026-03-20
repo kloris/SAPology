@@ -2752,34 +2752,44 @@ def check_cve_2025_31324(host, port, use_ssl=False, timeout=5):
                 verify=False,
                 allow_redirects=False,
             )
-            # A real Visual Composer endpoint returns 200 (GET) or we can check POST
-            if r.status_code in (200, 405):
-                # Verify it's not a generic page by checking for SAPControl content
+            # A real Visual Composer endpoint returns 200 with "FAILED" in the
+            # body (e.g. "FAILED: no file uploaded") or 405 on GET.
+            # Requiring "FAILED" on 200 prevents false positives from generic
+            # web servers or other SAP services that return 200 for any path.
+            if r.status_code == 200:
+                body = r.text
+                if "FAILED" not in body:
+                    break  # 200 but not the VC endpoint
+                if "sapcontrol" in body.lower() or "wsdl" in body.lower():
+                    break  # SAPControl generic response, not VC
+            elif r.status_code == 405:
                 body = r.text.lower()
                 if "sapcontrol" in body or "wsdl" in body:
                     break  # SAPControl generic response, not VC
-                finding = Finding(
-                    name="CVE-2025-31324 / CVE-2025-42999 - Visual Composer Unauthenticated Upload",
-                    severity=Severity.CRITICAL,
-                    description=(
-                        "The /developmentserver/metadatauploader endpoint on port %d "
-                        "is accessible without authentication (HTTP %d). This allows "
-                        "unauthenticated file upload leading to Remote Code Execution "
-                        "(CVE-2025-31324, CVSS 10.0). When chained with the "
-                        "deserialization flaw CVE-2025-42999 (CVSS 9.1), full "
-                        "unauthenticated RCE is achieved." % (port, r.status_code)
-                    ),
-                    remediation=(
-                        "Apply SAP Security Notes 3594142 and 3604119 immediately. "
-                        "As a workaround, disable Visual Composer or restrict access "
-                        "to /developmentserver/* paths."
-                    ),
-                    detail="GET %s://.../developmentserver/metadatauploader returned HTTP %d" % (scheme, r.status_code),
-                    port=port,
-                )
-                break
-            elif r.status_code in (401, 403, 404):
-                break  # Port accessible but endpoint not vulnerable
+            else:
+                if r.status_code in (401, 403, 404):
+                    break
+                continue
+            finding = Finding(
+                name="CVE-2025-31324 / CVE-2025-42999 - Visual Composer Unauthenticated Upload",
+                severity=Severity.CRITICAL,
+                description=(
+                    "The /developmentserver/metadatauploader endpoint on port %d "
+                    "is accessible without authentication (HTTP %d). This allows "
+                    "unauthenticated file upload leading to Remote Code Execution "
+                    "(CVE-2025-31324, CVSS 10.0). When chained with the "
+                    "deserialization flaw CVE-2025-42999 (CVSS 9.1), full "
+                    "unauthenticated RCE is achieved." % (port, r.status_code)
+                ),
+                remediation=(
+                    "Apply SAP Security Notes 3594142 and 3604119 immediately. "
+                    "As a workaround, disable Visual Composer or restrict access "
+                    "to /developmentserver/* paths."
+                ),
+                detail="GET %s://.../developmentserver/metadatauploader returned HTTP %d" % (scheme, r.status_code),
+                port=port,
+            )
+            break
         except RequestException:
             continue
     return finding
