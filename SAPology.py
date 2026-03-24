@@ -4931,35 +4931,41 @@ def _check_host_alive(host, timeout=2):
 
 
 def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
-                     cancel_check=None, client_enum=True):
+                     cancel_check=None, client_enum=True, skip_alive=False):
     """Phase 1: Discover SAP systems by port scanning and fingerprinting.
     cancel_check: callable returning True when scan should be aborted.
     client_enum: if True, enumerate SAP clients via DIAG login probes.
+    skip_alive: if True, skip the ICMP reachability check (useful for
+                cloud hosts that block ping, or when re-scanning a
+                system that is already known to be reachable).
     """
     landscape = []
 
     has_progress = HAS_RICH
 
     # Host reachability check — skip targets that are down
-    print("\n[*] Checking host reachability for %d target(s) ..." % len(targets))
-    alive_targets = []
-    with ThreadPoolExecutor(max_workers=min(len(targets), threads)) as executor:
-        futures = {executor.submit(_check_host_alive, t, min(timeout, 2)): t for t in targets}
-        for future in as_completed(futures):
-            if cancel_check and cancel_check():
-                for f in futures:
-                    f.cancel()
-                break
-            host = futures[future]
-            if future.result():
-                alive_targets.append(host)
-                print("[+] %s is reachable" % host)
-            else:
-                print("[-] %s is unreachable, skipping" % host)
-    targets = alive_targets
-    if not targets:
-        print("[*] No reachable targets found, nothing to scan.")
-        return landscape
+    if skip_alive:
+        print("\n[*] Skipping alive check for %d target(s)" % len(targets))
+    else:
+        print("\n[*] Checking host reachability for %d target(s) ..." % len(targets))
+        alive_targets = []
+        with ThreadPoolExecutor(max_workers=min(len(targets), threads)) as executor:
+            futures = {executor.submit(_check_host_alive, t, min(timeout, 2)): t for t in targets}
+            for future in as_completed(futures):
+                if cancel_check and cancel_check():
+                    for f in futures:
+                        f.cancel()
+                    break
+                host = futures[future]
+                if future.result():
+                    alive_targets.append(host)
+                    print("[+] %s is reachable" % host)
+                else:
+                    print("[-] %s is unreachable, skipping" % host)
+        targets = alive_targets
+        if not targets:
+            print("[*] No reachable targets found, nothing to scan.")
+            return landscape
 
     # Two-phase scanning: quick pre-scan with dispatcher/gateway only,
     # then full scan only on hosts where SAP was detected.
