@@ -4965,6 +4965,8 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
         targets = alive_targets
         if not targets:
             print("[*] No reachable targets found, nothing to scan.")
+            print("[*] Hint: use --skip-alive (CLI) or enable 'Skip Alive Check' (GUI)")
+            print("[*]       if the target blocks ICMP ping (e.g. cloud/firewalled hosts)")
             return landscape
 
     # Two-phase scanning: quick pre-scan with dispatcher/gateway only,
