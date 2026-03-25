@@ -7457,6 +7457,8 @@ examples:
                         help="Parallel threads for URL scanning (default: 25)")
     parser.add_argument("--gw-test-cmd", default="whoami",
                         help="Command for gateway SAPXPG test (default: whoami)")
+    parser.add_argument("--skip-alive", action="store_true",
+                        help="Skip ICMP alive check (for cloud/firewalled hosts that block ping)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Verbose output")
     parser.add_argument("--default-creds", action="store_true",
@@ -7595,7 +7597,8 @@ examples:
         print("\n" + "=" * 60)
         print(" Phase 1: System Discovery & Fingerprinting")
         print("=" * 60)
-        landscape = discover_systems(targets, instances, args.timeout, args.threads, args.verbose)
+        landscape = discover_systems(targets, instances, args.timeout, args.threads, args.verbose,
+                                     skip_alive=args.skip_alive)
 
         if not landscape and not has_btp:
             print("\n[-] No SAP systems discovered")

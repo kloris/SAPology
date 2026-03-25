@@ -303,7 +303,8 @@ class SAPologyApi:
                     targets, instances, timeout_val, threads_val,
                     config.get("verbose", False),
                     cancel_check=lambda: self.scan_cancelled,
-                    client_enum=config.get("client_enum", True))
+                    client_enum=config.get("client_enum", True),
+                    skip_alive=config.get("skip_alive", False))
 
                 if self.scan_cancelled:
                     print("\n[!] Scan cancelled by user")
@@ -1134,6 +1135,7 @@ GUI_HTML = r"""<!DOCTYPE html>
       <div class="toggle-row">URL Scanning <div class="toggle-switch on" id="toggle-url-scan" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">Client Enumeration <div class="toggle-switch on" id="toggle-client-enum" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row" title="Can lock SAP accounts">Default Credentials &#9888; <div class="toggle-switch" id="toggle-default-creds" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row" title="Skip ICMP ping check (for cloud/firewalled hosts)">Skip Alive Check <div class="toggle-switch" id="toggle-skip-alive" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">Verbose Output <div class="toggle-switch" id="toggle-verbose" onclick="this.classList.toggle('on')"></div></div>
     </div>
 
@@ -1552,6 +1554,7 @@ function startScan() {
         url_scan: document.getElementById('toggle-url-scan').classList.contains('on'),
         client_enum: document.getElementById('toggle-client-enum').classList.contains('on'),
         default_creds: document.getElementById('toggle-default-creds').classList.contains('on'),
+        skip_alive: document.getElementById('toggle-skip-alive').classList.contains('on'),
         verbose: document.getElementById('toggle-verbose').classList.contains('on'),
         btp_target: btpTarget,
         btp_keyword: btpKeyword,
