@@ -4931,7 +4931,7 @@ def _check_host_alive(host, timeout=2):
 
 
 def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
-                     cancel_check=None, client_enum=True, skip_alive=False):
+                     cancel_check=None, client_enum=True, skip_alive=True):
     """Phase 1: Discover SAP systems by port scanning and fingerprinting.
     cancel_check: callable returning True when scan should be aborted.
     client_enum: if True, enumerate SAP clients via DIAG login probes.
@@ -4965,8 +4965,8 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
         targets = alive_targets
         if not targets:
             print("[*] No reachable targets found, nothing to scan.")
-            print("[*] Hint: use --skip-alive (CLI) or enable 'Skip Alive Check' (GUI)")
-            print("[*]       if the target blocks ICMP ping (e.g. cloud/firewalled hosts)")
+            print("[*] Hint: alive check is skipped by default; use --no-skip-alive (CLI) or")
+            print("[*]       disable 'Skip Alive Check' (GUI) only if you want the ICMP check")
             return landscape
 
     # Two-phase scanning: quick pre-scan with dispatcher/gateway only,
@@ -7459,8 +7459,12 @@ examples:
                         help="Parallel threads for URL scanning (default: 25)")
     parser.add_argument("--gw-test-cmd", default="whoami",
                         help="Command for gateway SAPXPG test (default: whoami)")
-    parser.add_argument("--skip-alive", action="store_true",
-                        help="Skip ICMP alive check (for cloud/firewalled hosts that block ping)")
+    alive_group = parser.add_mutually_exclusive_group()
+    alive_group.add_argument("--skip-alive", dest="skip_alive", action="store_true", default=True,
+                        help="Skip ICMP alive check (default, since many cloud/firewalled "
+                             "hosts block ping)")
+    alive_group.add_argument("--no-skip-alive", dest="skip_alive", action="store_false",
+                        help="Force the ICMP alive check before scanning")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Verbose output")
     parser.add_argument("--default-creds", action="store_true",

@@ -304,7 +304,7 @@ class SAPologyApi:
                     config.get("verbose", False),
                     cancel_check=lambda: self.scan_cancelled,
                     client_enum=config.get("client_enum", True),
-                    skip_alive=config.get("skip_alive", False))
+                    skip_alive=config.get("skip_alive", True))
 
                 if self.scan_cancelled:
                     print("\n[!] Scan cancelled by user")
@@ -1135,7 +1135,7 @@ GUI_HTML = r"""<!DOCTYPE html>
       <div class="toggle-row">URL Scanning <div class="toggle-switch on" id="toggle-url-scan" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">Client Enumeration <div class="toggle-switch on" id="toggle-client-enum" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row" title="Can lock SAP accounts">Default Credentials &#9888; <div class="toggle-switch" id="toggle-default-creds" onclick="this.classList.toggle('on')"></div></div>
-      <div class="toggle-row" title="Skip ICMP ping check (for cloud/firewalled hosts)">Skip Alive Check <div class="toggle-switch" id="toggle-skip-alive" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row" title="Skip ICMP ping check (for cloud/firewalled hosts)">Skip Alive Check <div class="toggle-switch on" id="toggle-skip-alive" onclick="this.classList.toggle('on')"></div></div>
       <div class="toggle-row">Verbose Output <div class="toggle-switch" id="toggle-verbose" onclick="this.classList.toggle('on')"></div></div>
     </div>
 
