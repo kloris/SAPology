@@ -41,3 +41,7 @@ mockups/
 *.key
 *.crt
 .env
+
+# Local standalone scripts (not part of the main tool)
+diego_ssh_fingerprint.py
+poc_remote_abap_exec.py
