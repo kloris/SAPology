@@ -29,6 +29,7 @@ SAPology is an **SAP security testing tool** for discovering, fingerprinting, an
 - **Vulnerability assessment** - Checks for 15+ CVEs and misconfigurations including unprotected gateways (SAPXPG), open Message Server ports, HTTP smuggling, exposed admin consoles, SSL/TLS weaknesses, and HTTP verb tampering
 - **ICM URL scanning** - Tests 1,600+ SAP-specific URL paths per HTTP port for exposed endpoints
 - **Hail Mary mode** - Scans all RFC 1918 private subnets (~17.9M IPs) using async two-phase subnet sweeping, or a user-supplied subset via `--hm-ranges`
+- **Known inventory mode** - Feed a CSV of already-known SAP systems (`--inventory`); discovered systems are tagged known/unknown in the report so shadow or unmanaged SAP stands out. Optional `--inventory-skip` removes known systems from the report entirely for focused discovery.
 - **BTP Cloud Scanner** - Discovers and assesses SAP BTP subaccounts, Cloud Foundry apps, XSUAA, CPI, and other cloud services via CT logs, DNS, Shodan, Censys, and Wayback Machine
 - **HTML & JSON reporting** - Rich interactive HTML reports and structured JSON exports
 - **Desktop GUI** - Native desktop interface with real-time dashboard, severity charts, and findings browser
@@ -65,7 +66,31 @@ python3 SAPology.py --hail-mary --hm-ranges 10.50.0.0/16
 
 # Hail Mary - scan multiple user-supplied CIDRs
 python3 SAPology.py --hail-mary --hm-ranges 10.50.0.0/16,172.20.0.0/20,192.168.5.0/24
+
+# Known-inventory mode: tag each discovered system as known/unknown
+python3 SAPology.py -t 10.0.0.0/24 --inventory known_sap.csv
+
+# Known-inventory mode: skip known systems entirely (focused discovery)
+python3 SAPology.py -t 10.0.0.0/24 --inventory known_sap.csv --inventory-skip
 ```
+
+#### Inventory CSV Format
+
+The `--inventory` file is a plain CSV with 1-3 columns per row and `#` comments:
+
+```
+# known_sap.csv — fields: ip[,sid[,instance]]
+10.10.1.5                # whole host known (any SID/instance)
+10.10.2.38,AED           # any instance of SID AED on this IP is known
+10.10.3.100,AEQ,00       # only this specific instance is known
+10.10.3.100,AEQ,01       # and this one
+```
+
+In **tag mode** (default), everything is scanned and each result gets a
+"Known" or "Unknown" pill in the HTML report plus counts in the executive
+summary. In **skip mode** (`--inventory-skip`), known systems are removed
+from the landscape before vulnerability assessment, so the report only
+contains discoveries you didn't know about.
 
 ### BTP Cloud Scanner
 
@@ -202,6 +227,7 @@ usage: SAPology.py [-h] [--target TARGET] [--target-file TARGET_FILE]
                    [--gw-test-cmd GW_TEST_CMD] [-v] [--default-creds]
                    [--hail-mary] [--hm-offsets HM_OFFSETS]
                    [--hm-ranges HM_RANGES]
+                   [--inventory INVENTORY] [--inventory-skip]
 ```
 
 | Flag | Description |
@@ -222,6 +248,8 @@ usage: SAPology.py [-h] [--target TARGET] [--target-file TARGET_FILE]
 | `--hail-mary` | Scan RFC 1918 private subnets (all by default, or use `--hm-ranges`) |
 | `--hm-offsets` | Custom host offsets for hail-mary subnet sampling |
 | `--hm-ranges` | Restrict hail-mary to user-supplied CIDR ranges (comma-separated). Requires `--hail-mary`. Example: `10.50.0.0/16,172.20.0.0/20,192.168.5.0/24` |
+| `--inventory` | Path to CSV of known SAP systems (`ip[,sid[,instance]]` per line). Discovered systems tagged known/unknown in the HTML and JSON report |
+| `--inventory-skip` | Skip known systems entirely (remove from report and skip vuln assessment). Requires `--inventory` |
 
 ## BTP Cloud Scanning
 

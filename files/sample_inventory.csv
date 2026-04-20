@@ -1,0 +1,27 @@
+# SAPology known-systems inventory (--inventory) — sample file
+#
+# Format: ip[,sid[,instance]]
+#   - Lines starting with '#' are comments
+#   - Empty lines are ignored
+#   - Trailing '# comments' on data lines are stripped
+#
+# Granularity:
+#   1. IP only            -> whole host is known, matches any SID/instance
+#   2. IP + SID           -> any instance of that SID on this IP is known
+#   3. IP + SID + inst    -> only the specific instance is known
+#
+# Example rows (remove/replace with your real inventory):
+
+# Whole-host entries: every SAP service on these IPs is already known
+10.10.1.10
+192.168.5.200
+
+# SID-level entry: any instance of AED on this host is known, but other
+# SIDs discovered on the same IP will be flagged as unknown
+10.10.2.50,AED
+
+# Most specific entries: tag exact (ip, sid, instance) tuples as known
+10.10.3.100,AEQ,00
+10.10.3.100,AEQ,01
+10.10.3.100,AEQ,02
+10.10.3.100,AEQ,03

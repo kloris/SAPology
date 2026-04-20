@@ -592,6 +592,10 @@ class SAPInstance:
     info: Dict[str, str] = field(default_factory=dict)
     findings: List[Finding] = field(default_factory=list)
     url_scan_results: List[dict] = field(default_factory=list)
+    # True if this instance was matched against the user-supplied --inventory
+    # file. Defaults to False so existing behavior is unchanged when no
+    # inventory is provided.
+    is_known: bool = False
 
     def to_dict(self):
         return {
@@ -603,6 +607,7 @@ class SAPInstance:
             "info": self.info,
             "findings": [f.to_dict() for f in self.findings],
             "url_scan_results": self.url_scan_results,
+            "is_known": self.is_known,
         }
 
 
@@ -634,6 +639,12 @@ class SAPSystem:
             findings.extend(inst.findings)
         return findings
 
+    @property
+    def is_known(self) -> bool:
+        """A system is known iff it has at least one instance and every
+        instance was matched against the --inventory file."""
+        return bool(self.instances) and all(i.is_known for i in self.instances)
+
     def to_dict(self):
         return {
             "sid": self.sid,
@@ -647,6 +658,7 @@ class SAPSystem:
             "clients_redirected": self.clients_redirected,
             "instances": [i.to_dict() for i in self.instances],
             "relationships": self.relationships,
+            "is_known": self.is_known,
         }
 
 
@@ -3888,6 +3900,17 @@ def _system_type_pill_html(system_type):
             '%s%s</span>' % (bg, svg_el, html.escape(label)))
 
 
+def _system_inventory_pill_html(is_known):
+    """Return inline HTML pill badge marking a system as known/unknown
+    based on the --inventory match. Mirrors the style of _system_type_pill_html.
+    """
+    if is_known:
+        return ('<span class="sys-pill" style="background:#2ecc71">'
+                '&#10003; Known</span>')
+    return ('<span class="sys-pill" style="background:#e67e22">'
+            '&#9734; Unknown</span>')
+
+
 def _system_type_pill_svg(system_type, x, y):
     """Return SVG elements for a Style G pill badge at position (x, y)."""
     t = (system_type or "").upper()
@@ -4089,6 +4112,26 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
     info_count = sum(1 for s in landscape for f in s.all_findings() if f.severity == Severity.INFO)
     total_instances = sum(len(s.instances) for s in landscape)
 
+    # Inventory mode gates the Known/Unknown pills and summary cards so
+    # the report stays unchanged when no --inventory was supplied.
+    sp = scan_params or {}
+    inventory_active = bool(sp.get("inventory") and sp.get("inventory") != "not used")
+    known_count = sum(1 for s in landscape if s.is_known) if inventory_active else 0
+    unknown_count = sum(1 for s in landscape if not s.is_known) if inventory_active else 0
+    if inventory_active:
+        inventory_summary_html = (
+            '<div class="summary-card">'
+            '<div class="number" style="color: #2ecc71">%d</div>'
+            '<div class="label">Known</div>'
+            '</div>'
+            '<div class="summary-card">'
+            '<div class="number" style="color: #e67e22">%d</div>'
+            '<div class="label">Unknown</div>'
+            '</div>'
+        ) % (known_count, unknown_count)
+    else:
+        inventory_summary_html = ""
+
     # Include BTP findings in executive summary counts
     if btp_results:
         for ep in btp_results.endpoints:
@@ -4198,10 +4241,12 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         meta_str = " | ".join(meta_parts)
 
         type_pill = _system_type_pill_html(sys_obj.system_type)
+        inv_pill = (_system_inventory_pill_html(sys_obj.is_known)
+                    if inventory_active else "")
 
         system_details += """
         <div class="system-card" style="border-left: 4px solid %s">
-          <h3>%s %s %s</h3>
+          <h3>%s%s %s %s</h3>
           <p class="system-meta">%s</p>
           <table>
             <thead>
@@ -4213,6 +4258,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         """ % (
             border_color,
             type_pill,
+            (" " + inv_pill) if inv_pill else "",
             html.escape(sys_obj.sid),
             ("(%s)" % html.escape(sys_obj.hostname)) if sys_obj.hostname else "",
             meta_str,
@@ -4345,6 +4391,14 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
          ("Yes (%d hosts found)" % sp.get("hail_mary_hosts_found", 0))
              if sp.get("hail_mary") else "No",
          "No", "Scan RFC 1918 private subnets (use --hm-ranges to customize)"),
+        ("--inventory",
+         html.escape(sp.get("inventory", "not used")) +
+             ((" (%d entries)" % sp.get("inventory_entries", 0))
+              if sp.get("inventory_entries") else ""),
+         "not used", "CSV of known SAP systems (tags known vs unknown)"),
+        ("--inventory-skip",
+         "Yes" if sp.get("inventory_skip") else "No",
+         "No", "Skip known systems from report and vuln assessment"),
     ]
 
     # Add BTP options if BTP params are present
@@ -4462,6 +4516,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
     <div class="number" style="color: #ecf0f1">%d</div>
     <div class="label">Instances</div>
   </div>
+  %s
   <div class="summary-card">
     <div class="number" style="color: %s">%d</div>
     <div class="label">Critical</div>
@@ -4570,6 +4625,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
 </html>""" % (
         scan_time, duration_str,
         len(landscape), total_instances,
+        inventory_summary_html,
         SEVERITY_COLORS[Severity.CRITICAL], critical_count,
         SEVERITY_COLORS[Severity.HIGH], high_count,
         SEVERITY_COLORS[Severity.MEDIUM], medium_count,
@@ -4610,6 +4666,8 @@ def generate_json_export(landscape, output_path, btp_results=None):
             "medium": sum(1 for s in landscape for f in s.all_findings() if f.severity == Severity.MEDIUM),
             "low": sum(1 for s in landscape for f in s.all_findings() if f.severity == Severity.LOW),
             "info": sum(1 for s in landscape for f in s.all_findings() if f.severity == Severity.INFO),
+            "known_count": sum(1 for s in landscape if s.is_known),
+            "unknown_count": sum(1 for s in landscape if not s.is_known),
         }
     }
     if btp_results:
@@ -4931,17 +4989,36 @@ def _check_host_alive(host, timeout=2):
 
 
 def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
-                     cancel_check=None, client_enum=True, skip_alive=True):
+                     cancel_check=None, client_enum=True, skip_alive=True,
+                     inventory=None, inventory_skip=False):
     """Phase 1: Discover SAP systems by port scanning and fingerprinting.
     cancel_check: callable returning True when scan should be aborted.
     client_enum: if True, enumerate SAP clients via DIAG login probes.
     skip_alive: if True, skip the ICMP reachability check (useful for
                 cloud hosts that block ping, or when re-scanning a
                 system that is already known to be reachable).
+    inventory: optional list of InventoryEntry objects. When supplied,
+                discovered instances are tagged with is_known=True when
+                they match an inventory entry.
+    inventory_skip: if True and inventory supplied, drop whole-IP known
+                hosts from the scan target list before discovery (saves
+                time on hosts the user has already confirmed).
     """
     landscape = []
 
     has_progress = HAS_RICH
+
+    # Pre-discovery inventory skip: drop hosts the user flagged as fully
+    # known (IP-only entries). IP+SID / IP+SID+instance entries cannot be
+    # resolved here because the SID isn't known until after fingerprinting,
+    # so those are handled post-discovery in main().
+    if inventory and inventory_skip and targets:
+        before = len(targets)
+        targets = [t for t in targets if not inventory_whole_ip_known(inventory, t)]
+        skipped = before - len(targets)
+        if skipped:
+            print("[*] Inventory skip: %d whole-IP known host(s) excluded from scan"
+                  % skipped)
 
     # Host reachability check — skip targets that are down
     if skip_alive:
@@ -5694,6 +5771,10 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
 
         if len(sid_groups) <= 1:
             # Single system (common case) — keep as-is
+            if inventory:
+                for inst in sys_obj.instances:
+                    inst.is_known = inventory_match(
+                        inventory, inst.ip, sys_obj.sid, inst.instance_nr)
             landscape.append(sys_obj)
         else:
             # Multiple SAP systems on the same host — split into separate
@@ -5727,6 +5808,12 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     db = inst.info.get("RFCDBSYS", inst.info.get("sc_RFCDBSYS", ""))
                     if db and not new_sys.db_type:
                         new_sys.db_type = db
+                # Tag each instance against the inventory now that the SID
+                # is definitively known for this subgroup.
+                if inventory:
+                    for inst in inst_group:
+                        inst.is_known = inventory_match(
+                            inventory, inst.ip, sid, inst.instance_nr)
                 landscape.append(new_sys)
                 print("[*]   Separated SAP system %s with instances: %s" % (
                     sid, ", ".join(i.instance_nr for i in inst_group)))
@@ -7059,6 +7146,120 @@ def parse_hm_ranges(range_str):
     return out
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Known-Inventory feature: load a CSV of already-known SAP systems so the scan
+# can tag results as "known" vs "unknown" (or skip known systems entirely).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class InventoryEntry:
+    """One row from the known-systems CSV file.
+
+    Empty string in sid / instance means wildcard — the entry covers
+    anything at that IP (for sid="") or any instance of that SID
+    (for instance=""). SIDs are stored uppercase; instance numbers
+    are normalized to 2-digit zero-padded strings ("0" -> "00").
+    """
+    ip: str
+    sid: str = ""
+    instance: str = ""
+
+
+def load_inventory(path):
+    """Parse a known-systems CSV inventory file.
+
+    Format (one entry per line):
+        ip[,sid[,instance]]
+
+    Lines starting with '#' are comments, blank lines are ignored. Each
+    entry is validated: IP must be a valid IPv4 address, SID must be
+    1-3 uppercase alphanumerics, instance must be 0-99. Returns a list
+    of InventoryEntry. Raises ValueError with the offending line number
+    on malformed input, OSError if the file cannot be opened.
+    """
+    entries = []
+    with open(path, "r", encoding="utf-8") as f:
+        for lineno, raw in enumerate(f, start=1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            # Strip inline "# comment" tails so users can annotate rows
+            if "#" in line:
+                line = line.split("#", 1)[0].strip()
+                if not line:
+                    continue
+            cols = [c.strip() for c in line.split(",")]
+            if len(cols) < 1 or len(cols) > 3:
+                raise ValueError(
+                    "line %d: expected 1-3 columns (ip[,sid[,instance]]), got %d"
+                    % (lineno, len(cols)))
+            ip = cols[0]
+            try:
+                ipaddress.ip_address(ip)
+            except ValueError:
+                raise ValueError("line %d: invalid IP address %r" % (lineno, ip))
+            sid = cols[1].upper() if len(cols) >= 2 and cols[1] else ""
+            if sid and (len(sid) > 3 or not re.match(r'^[A-Z0-9]{1,3}$', sid)):
+                raise ValueError(
+                    "line %d: invalid SID %r (expected 1-3 uppercase alphanumerics)"
+                    % (lineno, sid))
+            inst_raw = cols[2] if len(cols) >= 3 and cols[2] else ""
+            if inst_raw:
+                try:
+                    inst_int = int(inst_raw)
+                except ValueError:
+                    raise ValueError(
+                        "line %d: invalid instance %r (expected 0-99)"
+                        % (lineno, inst_raw))
+                if inst_int < 0 or inst_int > 99:
+                    raise ValueError(
+                        "line %d: instance %d out of range (0-99)"
+                        % (lineno, inst_int))
+                instance = "%02d" % inst_int
+            else:
+                instance = ""
+            entries.append(InventoryEntry(ip=ip, sid=sid, instance=instance))
+    return entries
+
+
+def inventory_match(entries, ip, sid, instance_nr):
+    """Return True if (ip, sid, instance_nr) is covered by any inventory entry.
+
+    Matching rules per entry:
+      - entry.ip must equal the scanned ip
+      - entry.sid == "" is wildcard (matches any SID)
+      - entry.instance == "" is wildcard (matches any instance)
+    """
+    if not entries:
+        return False
+    sid_upper = (sid or "").upper()
+    for e in entries:
+        if e.ip != ip:
+            continue
+        if e.sid and e.sid != sid_upper:
+            continue
+        if e.instance and e.instance != instance_nr:
+            continue
+        return True
+    return False
+
+
+def inventory_whole_ip_known(entries, ip):
+    """Return True iff there is at least one IP-only inventory entry for `ip`.
+
+    Pre-discovery skip only works for whole-host entries because we don't
+    yet know the SID or instance numbers on the target. Entries like
+    "10.0.0.5,AED,00" require discovery to match, so they are NOT
+    considered here.
+    """
+    if not entries:
+        return False
+    for e in entries:
+        if e.ip == ip and not e.sid and not e.instance:
+            return True
+    return False
+
+
 async def _hm_probe_tcp(ip_str, port, timeout):
     """Async TCP connect probe. Returns (ip_str, 'open'|'refused'|'closed')."""
     try:
@@ -7525,6 +7726,18 @@ examples:
                              "Useful for focused assessments of a known internal network. "
                              "Requires --hail-mary. Example: "
                              "--hm-ranges 10.50.0.0/16,172.20.0.0/20,192.168.5.0/24")
+    parser.add_argument("--inventory",
+                        help="Path to a CSV inventory of already-known SAP systems "
+                             "(columns: ip[,sid[,instance]]). Discovered systems are "
+                             "tagged known/unknown in the HTML and JSON report so "
+                             "shadow/unmanaged SAP stands out. Inventory rows can be "
+                             "IP-only (whole host known), IP+SID (any instance of that "
+                             "SID is known), or IP+SID+instance (most specific).")
+    parser.add_argument("--inventory-skip", action="store_true",
+                        help="When --inventory is supplied, remove known systems from "
+                             "the report and skip vulnerability assessment on them. "
+                             "Useful for focused discovery of unknown systems. "
+                             "Requires --inventory.")
 
     # BTP Cloud Scanning
     btp_group = parser.add_argument_group("BTP Cloud Scanning")
@@ -7564,6 +7777,8 @@ examples:
                or args.btp_subaccount or args.btp_targets)
     if args.hm_ranges and not args.hail_mary:
         parser.error("--hm-ranges requires --hail-mary")
+    if args.inventory_skip and not args.inventory:
+        parser.error("--inventory-skip requires --inventory")
     if not args.hail_mary and not args.target and not args.target_file and not has_btp:
         parser.error("At least one of --target, --target-file, --hail-mary, or --btp* is required")
 
@@ -7600,6 +7815,19 @@ examples:
             timeout=0.5, verbose=args.verbose)
         if not hail_mary_hosts:
             print("[*] Hail Mary found no SAP hosts on private subnets")
+
+    # --- Load known-systems inventory (optional, enables tag/skip mode) ---
+    inventory = None
+    if args.inventory:
+        try:
+            inventory = load_inventory(args.inventory)
+        except ValueError as e:
+            parser.error("--inventory: %s" % e)
+        except OSError as e:
+            parser.error("--inventory: cannot read %r: %s" % (args.inventory, e))
+        mode = "skip" if args.inventory_skip else "tag"
+        print("[*] Loaded %d inventory entries from %s (mode: %s)"
+              % (len(inventory), args.inventory, mode))
 
     # Parse explicit targets (if any) and merge with hail mary results
     targets = parse_targets(args.target, args.target_file)
@@ -7643,6 +7871,9 @@ examples:
             "verbose": args.verbose,
             "hail_mary": args.hail_mary,
             "hail_mary_hosts_found": len(hail_mary_hosts),
+            "inventory": args.inventory or "not used",
+            "inventory_entries": len(inventory) if inventory else 0,
+            "inventory_skip": args.inventory_skip,
         }
         if has_btp:
             scan_params["btp_target"] = args.btp_target or ""
@@ -7662,7 +7893,23 @@ examples:
         print(" Phase 1: System Discovery & Fingerprinting")
         print("=" * 60)
         landscape = discover_systems(targets, instances, args.timeout, args.threads, args.verbose,
-                                     skip_alive=args.skip_alive)
+                                     skip_alive=args.skip_alive,
+                                     inventory=inventory,
+                                     inventory_skip=args.inventory_skip)
+
+        # Post-discovery inventory skip: remove known systems from the
+        # landscape so the vulnerability phase and the final report only
+        # cover unknown systems. We do this after discovery (not before)
+        # because IP+SID / IP+SID+instance entries need the SID resolved.
+        if inventory and args.inventory_skip:
+            original = len(landscape)
+            for sys_obj in landscape:
+                sys_obj.instances = [i for i in sys_obj.instances if not i.is_known]
+            landscape = [s for s in landscape if s.instances]
+            removed = original - len(landscape)
+            if removed:
+                print("[*] Inventory skip: %d known system(s) removed from report"
+                      % removed)
 
         if not landscape and not has_btp:
             print("\n[-] No SAP systems discovered")
