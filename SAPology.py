@@ -4344,7 +4344,7 @@ def generate_html_report(landscape, output_path, scan_duration=0, scan_params=No
         ("--hail-mary",
          ("Yes (%d hosts found)" % sp.get("hail_mary_hosts_found", 0))
              if sp.get("hail_mary") else "No",
-         "No", "Scan all RFC 1918 private subnets"),
+         "No", "Scan RFC 1918 private subnets (use --hm-ranges to customize)"),
     ]
 
     # Add BTP options if BTP params are present
@@ -7034,6 +7034,31 @@ def _hail_mary_raise_fd_limit():
         return None
 
 
+def parse_hm_ranges(range_str):
+    """Parse a comma-separated list of CIDR ranges for --hm-ranges.
+
+    Validates each entry with ipaddress.ip_network(). Accepts host-bit-set
+    inputs (e.g. "10.50.1.5/24") via strict=False and normalizes them to
+    network form. Returns a list of CIDR strings. Raises ValueError on
+    invalid input.
+    """
+    if not range_str:
+        return []
+    out = []
+    for part in range_str.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            net = ipaddress.ip_network(part, strict=False)
+        except (ValueError, TypeError) as e:
+            raise ValueError("Invalid CIDR range %r: %s" % (part, e))
+        if net.version != 4:
+            raise ValueError("Only IPv4 ranges are supported (got %s)" % part)
+        out.append(str(net))
+    return out
+
+
 async def _hm_probe_tcp(ip_str, port, timeout):
     """Async TCP connect probe. Returns (ip_str, 'open'|'refused'|'closed')."""
     try:
@@ -7197,13 +7222,21 @@ def hail_mary_discover(timeout=0.5, verbose=False):
     _hail_mary_raise_fd_limit()
     concurrency = _hail_mary_get_concurrency()
 
+    # Compute totals dynamically so --hm-ranges shows the right numbers
+    total_ips = sum(int(ipaddress.ip_network(r).num_addresses)
+                    for r in HAIL_MARY_RANGES)
+    ranges_str = "  ".join(HAIL_MARY_RANGES)
+    banner_title = ("HAIL MARY — Scanning all RFC 1918 private subnets"
+                    if HAIL_MARY_RANGES == ["192.168.0.0/16", "172.16.0.0/12", "10.0.0.0/8"]
+                    else "HAIL MARY — Scanning user-supplied subnets")
+
     console = Console(stderr=True)
     console.print()
     console.print("[bold red]" + "=" * 62)
-    console.print("[bold red]  HAIL MARY — Scanning all RFC 1918 private subnets")
+    console.print("[bold red]  " + banner_title)
     console.print("[bold red]" + "=" * 62)
-    console.print("[white]  Ranges:      192.168.0.0/16  172.16.0.0/12  10.0.0.0/8")
-    console.print("[white]  Total:       ~17.9 million IP addresses")
+    console.print("[white]  Ranges:      %s" % ranges_str)
+    console.print("[white]  Total:       ~{:,} IP addresses".format(total_ips))
     console.print("[white]  Offsets:     .%s" %
                   ", .".join(str(o) for o in HAIL_MARY_SUBNET_SAMPLES))
     console.print("[white]  Strategy:    Two-phase async sweep (subnet → host)")
@@ -7390,11 +7423,14 @@ vulnerability checks (BTP cloud):
   BTP-INFO-003   HIGH       Debug/trace mode enabled in production
 
 hail mary mode (--hail-mary):
-  Scans ALL RFC 1918 private subnets for SAP systems:
+  By default, scans ALL RFC 1918 private subnets for SAP systems:
     192.168.0.0/16   (65,536 IPs)
     172.16.0.0/12    (1,048,576 IPs)
     10.0.0.0/8       (16,777,216 IPs)
     Total:           ~17.9 million IP addresses across 69,888 /24 subnets
+
+  Use --hm-ranges to scan a smaller, user-supplied set of CIDR ranges
+  instead of the full RFC 1918 space (see examples below).
 
   Uses a two-phase async discovery algorithm to make this tractable:
 
@@ -7435,6 +7471,8 @@ examples:
   sap_scanner.py --target 10.0.0.0/24 --instances 00-05
   sap_scanner.py --hail-mary
   sap_scanner.py --hail-mary --hm-offsets 1,10,50,100,150,200,250
+  sap_scanner.py --hail-mary --hm-ranges 10.50.0.0/16
+  sap_scanner.py --hail-mary --hm-ranges 10.50.0.0/16,172.20.0.0/20,192.168.5.0/24
   sap_scanner.py --hail-mary --target 192.168.2.209 --skip-vuln
   sap_scanner.py --target-file hosts.txt --json results.json
 """,
@@ -7471,15 +7509,22 @@ examples:
                         help="Check default SAP user/password combinations via DIAG "
                              "(WARNING: can lock accounts)")
     parser.add_argument("--hail-mary", action="store_true",
-                        help="Scan ALL RFC 1918 private subnets (~17.9M IPs) for SAP systems. "
+                        help="Scan RFC 1918 private subnets (~17.9M IPs by default) for SAP systems. "
                              "Uses two-phase async discovery: Phase 1 probes 8 sample IPs per "
                              "/24 subnet on ports 3200 and 443 to find live subnets, Phase 2 "
                              "scans all hosts in live /24s on 203 SAP indicator ports (3200-3399, "
-                             "50013, 1128, 1129). See below for full details.")
+                             "50013, 1128, 1129). Combine with --hm-ranges to narrow the scope to "
+                             "specific CIDRs. See below for full details.")
     parser.add_argument("--hm-offsets",
                         help="Custom host offsets for hail-mary Phase 1 subnet sampling "
                              "(comma-separated, 1-254). Default: 1,2,5,10,21,29,50,80. "
                              "Example: --hm-offsets 1,5,10,50,100,200")
+    parser.add_argument("--hm-ranges",
+                        help="Restrict hail-mary scanning to user-supplied CIDR range(s) "
+                             "instead of all RFC 1918 space (comma-separated IPv4 CIDRs). "
+                             "Useful for focused assessments of a known internal network. "
+                             "Requires --hail-mary. Example: "
+                             "--hm-ranges 10.50.0.0/16,172.20.0.0/20,192.168.5.0/24")
 
     # BTP Cloud Scanning
     btp_group = parser.add_argument_group("BTP Cloud Scanning")
@@ -7517,13 +7562,15 @@ examples:
 
     has_btp = (args.btp or args.btp_target or args.btp_discover or args.btp_domain
                or args.btp_subaccount or args.btp_targets)
+    if args.hm_ranges and not args.hail_mary:
+        parser.error("--hm-ranges requires --hail-mary")
     if not args.hail_mary and not args.target and not args.target_file and not has_btp:
         parser.error("At least one of --target, --target-file, --hail-mary, or --btp* is required")
 
     global VERBOSE
     VERBOSE = args.verbose
 
-    # --- Hail Mary: async discovery of SAP hosts across all private subnets ---
+    # --- Hail Mary: async discovery of SAP hosts across private subnets ---
     if args.hm_offsets:
         global HAIL_MARY_SUBNET_SAMPLES
         offsets = []
@@ -7533,6 +7580,17 @@ examples:
                 parser.error("--hm-offsets values must be between 1 and 254, got %d" % val)
             offsets.append(val)
         HAIL_MARY_SUBNET_SAMPLES = sorted(set(offsets))
+
+    if args.hm_ranges:
+        if not args.hail_mary:
+            parser.error("--hm-ranges requires --hail-mary")
+        global HAIL_MARY_RANGES
+        try:
+            HAIL_MARY_RANGES = parse_hm_ranges(args.hm_ranges)
+        except ValueError as e:
+            parser.error("--hm-ranges: %s" % e)
+        if not HAIL_MARY_RANGES:
+            parser.error("--hm-ranges: no valid CIDR ranges provided")
 
     hail_mary_hosts = []
     if args.hail_mary:

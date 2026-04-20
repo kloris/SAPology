@@ -28,7 +28,7 @@ SAPology is an **SAP security testing tool** for discovering, fingerprinting, an
 - **System type detection** - Identifies ABAP, Java, ABAP+Java, BusinessObjects, Cloud Connector, Content Server, SAP Router, MDM, and HANA systems
 - **Vulnerability assessment** - Checks for 15+ CVEs and misconfigurations including unprotected gateways (SAPXPG), open Message Server ports, HTTP smuggling, exposed admin consoles, SSL/TLS weaknesses, and HTTP verb tampering
 - **ICM URL scanning** - Tests 1,600+ SAP-specific URL paths per HTTP port for exposed endpoints
-- **Hail Mary mode** - Scans all RFC 1918 private subnets (~17.9M IPs) using async two-phase subnet sweeping
+- **Hail Mary mode** - Scans all RFC 1918 private subnets (~17.9M IPs) using async two-phase subnet sweeping, or a user-supplied subset via `--hm-ranges`
 - **BTP Cloud Scanner** - Discovers and assesses SAP BTP subaccounts, Cloud Foundry apps, XSUAA, CPI, and other cloud services via CT logs, DNS, Shodan, Censys, and Wayback Machine
 - **HTML & JSON reporting** - Rich interactive HTML reports and structured JSON exports
 - **Desktop GUI** - Native desktop interface with real-time dashboard, severity charts, and findings browser
@@ -59,6 +59,12 @@ python3 SAPology.py -t 192.168.1.100 --default-creds
 
 # Hail Mary - scan all private subnets
 python3 SAPology.py --hail-mary
+
+# Hail Mary - scan only a specific internal range (focused assessment)
+python3 SAPology.py --hail-mary --hm-ranges 10.50.0.0/16
+
+# Hail Mary - scan multiple user-supplied CIDRs
+python3 SAPology.py --hail-mary --hm-ranges 10.50.0.0/16,172.20.0.0/20,192.168.5.0/24
 ```
 
 ### BTP Cloud Scanner
@@ -195,6 +201,7 @@ usage: SAPology.py [-h] [--target TARGET] [--target-file TARGET_FILE]
                    [--url-scan-threads URL_SCAN_THREADS]
                    [--gw-test-cmd GW_TEST_CMD] [-v] [--default-creds]
                    [--hail-mary] [--hm-offsets HM_OFFSETS]
+                   [--hm-ranges HM_RANGES]
 ```
 
 | Flag | Description |
@@ -212,8 +219,9 @@ usage: SAPology.py [-h] [--target TARGET] [--target-file TARGET_FILE]
 | `--gw-test-cmd` | OS command for gateway SAPXPG test (default: `id`) |
 | `-v`, `--verbose` | Verbose output |
 | `--default-creds` | Check default SAP user/password combinations via DIAG (opt-in, can lock accounts) |
-| `--hail-mary` | Scan all RFC 1918 private subnets |
+| `--hail-mary` | Scan RFC 1918 private subnets (all by default, or use `--hm-ranges`) |
 | `--hm-offsets` | Custom host offsets for hail-mary subnet sampling |
+| `--hm-ranges` | Restrict hail-mary to user-supplied CIDR ranges (comma-separated). Requires `--hail-mary`. Example: `10.50.0.0/16,172.20.0.0/20,192.168.5.0/24` |
 
 ## BTP Cloud Scanning
 
