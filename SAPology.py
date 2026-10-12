@@ -5661,10 +5661,16 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                         if rt_info.get("hostname") and not sys_obj.hostname:
                             sys_obj.hostname = rt_info["hostname"]
                     elif rt_info.get("accessible"):
-                        # TCP connected but SAProuter string not in response;
-                        # register anyway since port 3299 is a known SAP Router port
-                        instance.services["saprouter"] = {"port": port}
-                        log_verbose("  SAP Router on port %d: TCP open, protocol unconfirmed" % port)
+                        # TCP connected but the SAProuter protocol banner was
+                        # NOT seen. Do NOT register "saprouter" on bare TCP-open:
+                        # a Web Dispatcher (or any service) may listen on 3299,
+                        # and registering it would mis-classify the host as a
+                        # fictitious SAPROUTER system (SAPMAP issue #90). Leave
+                        # the port unclassified so the host falls through to its
+                        # real type (ABAP/JAVA/WD) or the non-SAP skip.
+                        log_verbose("  SAP Router on port %d: TCP open but no "
+                                    "SAProuter handshake — NOT classifying as "
+                                    "SAPROUTER" % port)
 
             sys_obj.instances.append(instance)
 

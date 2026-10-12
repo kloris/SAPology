@@ -825,5 +825,65 @@ class TestSapPortsConstants(unittest.TestCase):
         self.assertIn(3389, NON_SAP_PORTS)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SAProuter classification gate (issue #90) — require a positive handshake
+# ═══════════════════════════════════════════════════════════════════════════
+
+class _FakeSock:
+    """Minimal socket stand-in that replays one canned response."""
+    def __init__(self, resp):
+        self._resp = resp
+    def settimeout(self, *a):
+        pass
+    def connect(self, *a):
+        pass
+    def sendall(self, *a):
+        pass
+    def recv(self, n):
+        r, self._resp = self._resp, b""
+        return r
+    def close(self):
+        pass
+
+
+class TestSAProuterHandshakeGate(unittest.TestCase):
+    """A Web Dispatcher (or any service) on 3299 must NOT be classified as a
+    SAProuter without a positive protocol handshake (SAPMAP issue #90)."""
+
+    def test_fingerprint_confirmed_on_banner(self):
+        with patch("SAPology.socket.socket",
+                   side_effect=lambda *a, **k: _FakeSock(
+                       b"\x00\x00\x00\x2aSAProuter 40.4 on 'rtr01'")):
+            info = SAPology.fingerprint_saprouter("10.0.0.1", 3299, timeout=1)
+        self.assertTrue(info.get("confirmed"))
+        self.assertTrue(info.get("accessible"))
+
+    def test_fingerprint_accessible_but_not_confirmed_on_web_server(self):
+        # A Web Dispatcher / HTTP service answers HTTP, not the NI banner.
+        with patch("SAPology.socket.socket",
+                   side_effect=lambda *a, **k: _FakeSock(
+                       b"HTTP/1.1 200 OK\r\nServer: SAP Web Dispatcher\r\n")):
+            info = SAPology.fingerprint_saprouter("10.0.0.1", 3299, timeout=1)
+        self.assertTrue(info.get("accessible"))
+        self.assertFalse(info.get("confirmed"))
+
+    def test_gate_registers_saprouter_only_when_confirmed(self):
+        """Regression: the accessible-but-unconfirmed branch must no longer
+        register a 'saprouter' service (the old 'register anyway' behaviour
+        turned a WD into a fictitious SAPROUTER system)."""
+        import inspect
+        src = inspect.getsource(SAPology)
+        i = src.index("rt_info = fingerprint_saprouter(")
+        block = src[i:i + 1600]
+        self.assertIn('if rt_info.get("confirmed"):', block)
+        self.assertIn('instance.services["saprouter"]', block)
+        acc = block.index('elif rt_info.get("accessible"):')
+        acc_body = block[acc:]
+        self.assertNotIn(
+            'instance.services["saprouter"]', acc_body,
+            "unconfirmed 3299 must not register a saprouter service (#90)")
+        self.assertIn("SAProuter handshake", acc_body)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
