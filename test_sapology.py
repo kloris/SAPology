@@ -885,5 +885,114 @@ class TestSAProuterHandshakeGate(unittest.TestCase):
         self.assertIn("SAProuter handshake", acc_body)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Opt-in scan-credentials bundle (SAPMAP issue #220)
+#
+#   discover_systems() / assess_vulnerabilities() accept an optional creds
+#   bundle. Fully opt-in: with no bundle the behaviour is byte-for-byte
+#   unchanged. When supplied, each discovered system is stamped with the
+#   bundle's snc_partnername so a caller that owns the SNC wallet (SAPMAP)
+#   can run an authenticated SNC probe on its side.
+# ═══════════════════════════════════════════════════════════════════════════
+class TestScanCredsBundle(unittest.TestCase):
+
+    def test_module_declares_version(self):
+        self.assertIsInstance(SAPology.__version__, str)
+        self.assertTrue(SAPology.__version__)
+
+    def test_entry_points_accept_creds_kwarg(self):
+        """Both deep-scan entry points SAPMAP calls accept the opt-in
+        creds bundle — the capability SAPMAP feature-detects on."""
+        import inspect
+        disc = inspect.signature(SAPology.discover_systems).parameters
+        assess = inspect.signature(SAPology.assess_vulnerabilities).parameters
+        self.assertIn("creds", disc)
+        self.assertIsNone(disc["creds"].default)
+        self.assertIn("creds", assess)
+        self.assertIsNone(assess["creds"].default)
+
+    def test_normalize_none_and_empty_return_none(self):
+        self.assertIsNone(SAPology.normalize_scan_creds(None))
+        self.assertIsNone(SAPology.normalize_scan_creds({}))
+        self.assertIsNone(SAPology.normalize_scan_creds(
+            {"user": "", "password": "", "snc_partnername": ""}))
+
+    def test_normalize_from_dict(self):
+        sc = SAPology.normalize_scan_creds({
+            "user": "SAPMAP00", "password": "pw",
+            "snc_partnername": "p:CN=S4H", "snc_config": {"identity": "p:CN=lab"}})
+        self.assertIsInstance(sc, SAPology.ScanCreds)
+        self.assertEqual(sc.user, "SAPMAP00")
+        self.assertEqual(sc.snc_partnername, "p:CN=S4H")
+        self.assertEqual(sc.snc_config, {"identity": "p:CN=lab"})
+
+    def test_normalize_passthrough_scancreds(self):
+        sc = SAPology.ScanCreds(snc_partnername="p:CN=NPL")
+        self.assertIs(SAPology.normalize_scan_creds(sc), sc)
+
+    def test_normalize_from_duck_typed_object(self):
+        class _Obj:
+            user = "u"
+            password = "p"
+            snc_partnername = "p:CN=X"
+            snc_config = {"k": "v"}
+        sc = SAPology.normalize_scan_creds(_Obj())
+        self.assertEqual(sc.snc_partnername, "p:CN=X")
+        self.assertEqual(sc.user, "u")
+
+    def test_sapsystem_defaults_have_no_snc_context(self):
+        s = SAPology.SAPSystem(sid="NPL")
+        self.assertEqual(s.snc_partnername, "")
+        self.assertFalse(s.snc_creds_supplied)
+        d = s.to_dict()
+        self.assertIn("snc_partnername", d)
+        self.assertIn("snc_creds_supplied", d)
+        self.assertEqual(d["snc_partnername"], "")
+        self.assertFalse(d["snc_creds_supplied"])
+
+    def test_stamp_sets_partnername_and_flag(self):
+        s = SAPology.SAPSystem(sid="NPL")
+        sc = SAPology.normalize_scan_creds({"snc_partnername": "p:CN=NPL"})
+        SAPology.stamp_snc_context([s], sc)
+        self.assertEqual(s.snc_partnername, "p:CN=NPL")
+        self.assertTrue(s.snc_creds_supplied)
+
+    def test_stamp_preserves_existing_partnername(self):
+        """A system already carrying an SNC partner (e.g. SAPology learned
+        it itself) is never overwritten by the bundle."""
+        s = SAPology.SAPSystem(sid="X", snc_partnername="p:CN=EXISTING")
+        sc = SAPology.normalize_scan_creds({"snc_partnername": "p:CN=OTHER"})
+        SAPology.stamp_snc_context([s], sc)
+        self.assertEqual(s.snc_partnername, "p:CN=EXISTING")
+        self.assertTrue(s.snc_creds_supplied)
+
+    def test_stamp_no_creds_is_byte_for_byte_noop(self):
+        """No bundle → systems are untouched (no stamping, no flag)."""
+        s = SAPology.SAPSystem(sid="NPL")
+        SAPology.stamp_snc_context([s], None)
+        self.assertEqual(s.snc_partnername, "")
+        self.assertFalse(s.snc_creds_supplied)
+
+    def test_stamp_user_password_only_sets_flag_not_partner(self):
+        """A bundle with creds but no SNC partner flags participation but
+        stamps no partner name."""
+        s = SAPology.SAPSystem(sid="NPL")
+        sc = SAPology.normalize_scan_creds({"user": "SAPMAP00", "password": "pw"})
+        SAPology.stamp_snc_context([s], sc)
+        self.assertEqual(s.snc_partnername, "")
+        self.assertTrue(s.snc_creds_supplied)
+
+    def test_assess_vulnerabilities_carries_context_without_network(self):
+        """assess_vulnerabilities(creds=...) stamps the SNC partner onto a
+        landscape that was discovered WITHOUT the bundle — on an empty
+        single-system landscape it does no network I/O."""
+        inst = SAPology.SAPInstance(host="h", ip="10.0.0.1", instance_nr="00")
+        s = SAPology.SAPSystem(sid="NPL", instances=[inst])
+        out = SAPology.assess_vulnerabilities(
+            [s], timeout=1, creds={"snc_partnername": "p:CN=NPL"})
+        self.assertEqual(out[0].snc_partnername, "p:CN=NPL")
+        self.assertTrue(out[0].snc_creds_supplied)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

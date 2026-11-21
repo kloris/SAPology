@@ -144,6 +144,14 @@ try:
 except ImportError:
     HAS_DEFAULT_CREDS = False
 
+# Module version.  1.1.0 is the first release to accept the opt-in
+# ``creds`` bundle on ``discover_systems`` / ``assess_vulnerabilities``
+# (SAPMAP issue #220); 1.0.x builds had no ``creds`` parameter.  Callers
+# feature-detect the capability by the presence of the ``creds`` kwarg in
+# the signature (robust across un-versioned older checkouts) and use this
+# string only for logging / display.
+__version__ = "1.1.0"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SAPology Banner
@@ -624,6 +632,12 @@ class SAPSystem:
     clients: List[str] = field(default_factory=list)
     clients_redirected: bool = False
     relationships: List[dict] = field(default_factory=list)
+    # SAPMAP issue #220 — opt-in SNC context threaded in via the creds
+    # bundle (discover_systems(creds=...) / assess_vulnerabilities(creds=...)).
+    # Empty/False unless a caller supplied a bundle, so no-creds discovery
+    # stays byte-for-byte unchanged.
+    snc_partnername: str = ""
+    snc_creds_supplied: bool = False
 
     def highest_severity(self) -> Optional[Severity]:
         sev = None
@@ -659,7 +673,87 @@ class SAPSystem:
             "instances": [i.to_dict() for i in self.instances],
             "relationships": self.relationships,
             "is_known": self.is_known,
+            "snc_partnername": self.snc_partnername,
+            "snc_creds_supplied": self.snc_creds_supplied,
         }
+
+
+# ---------------------------------------------------------------------------
+# Opt-in scan-credentials bundle (SAPMAP issue #220)
+# ---------------------------------------------------------------------------
+@dataclass
+class ScanCreds:
+    """Optional, opt-in credential/context bundle a caller (e.g. SAPMAP's
+    deep-scan bridge) may hand to :func:`discover_systems` /
+    :func:`assess_vulnerabilities`.
+
+    Fully opt-in: when no bundle is supplied every probe behaves exactly as
+    before — the no-creds deep scan is byte-for-byte unchanged.
+
+    SAPology deliberately does NOT perform an SNC handshake itself: it has
+    no SNC transport, no CommonCryptoLib binding and no looted-PSE wallet —
+    that machinery lives in the *caller* (SAPMAP owns it).  The bundle lets
+    the caller thread its operator SNC context *through* discovery so each
+    discovered :class:`SAPSystem` carries the SNC partner name the operator
+    is targeting, and reserves ``user`` / ``password`` for creds-bearing
+    probes a future release may add.  The caller then runs the authenticated
+    SNC probe on its side using the system's stamped ``snc_partnername``.
+    """
+    user: str = ""
+    password: str = ""
+    snc_partnername: str = ""
+    snc_config: dict = field(default_factory=dict)
+
+
+def normalize_scan_creds(creds):
+    """Coerce a caller-supplied creds bundle into a :class:`ScanCreds`, or None.
+
+    Accepts a ``ScanCreds``, a plain ``dict`` with any of
+    ``{user, password, snc_partnername, snc_config}``, a duck-typed object
+    exposing those attributes, or ``None``.  Returns ``None`` when nothing
+    actionable was supplied so callers can cheaply gate on ``if sc:``.
+    """
+    if creds is None:
+        return None
+    if isinstance(creds, ScanCreds):
+        sc = creds
+    elif isinstance(creds, dict):
+        sc = ScanCreds(
+            user=str(creds.get("user", "") or ""),
+            password=str(creds.get("password", "") or ""),
+            snc_partnername=str(creds.get("snc_partnername", "") or ""),
+            snc_config=dict(creds.get("snc_config", {}) or {}),
+        )
+    else:
+        sc = ScanCreds(
+            user=str(getattr(creds, "user", "") or ""),
+            password=str(getattr(creds, "password", "") or ""),
+            snc_partnername=str(getattr(creds, "snc_partnername", "") or ""),
+            snc_config=dict(getattr(creds, "snc_config", {}) or {}),
+        )
+    if not (sc.user or sc.password or sc.snc_partnername or sc.snc_config):
+        return None
+    return sc
+
+
+def stamp_snc_context(landscape, scan_creds):
+    """Thread an opt-in creds bundle's SNC partner name onto discovered
+    systems (SAPMAP issue #220).
+
+    When the caller supplied an ``snc_partnername``, stamp it onto every
+    discovered system that does not already carry one, and flag that a creds
+    bundle participated in the scan.  Idempotent and metadata-only — it
+    performs no network I/O and changes no probe verdict on SAPology's side.
+    A no-op when no bundle (or no partner name) was supplied.
+    """
+    if not scan_creds:
+        return landscape
+    name = (scan_creds.snc_partnername or "").strip()
+    for sys_obj in (landscape or []):
+        sys_obj.snc_creds_supplied = True
+        if name and not (getattr(sys_obj, "snc_partnername", "") or "").strip():
+            sys_obj.snc_partnername = name
+    return landscape
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4990,10 +5084,16 @@ def _check_host_alive(host, timeout=2):
 
 def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                      cancel_check=None, client_enum=True, skip_alive=True,
-                     inventory=None, inventory_skip=False):
+                     inventory=None, inventory_skip=False, creds=None):
     """Phase 1: Discover SAP systems by port scanning and fingerprinting.
     cancel_check: callable returning True when scan should be aborted.
     client_enum: if True, enumerate SAP clients via DIAG login probes.
+    creds: optional opt-in credential/context bundle (ScanCreds, dict, or
+                None — see :class:`ScanCreds`, SAPMAP issue #220).  Fully
+                opt-in: with ``None`` discovery is byte-for-byte unchanged.
+                When supplied, each discovered system is stamped with the
+                bundle's ``snc_partnername`` so a caller that owns the SNC
+                wallet can run an authenticated SNC probe on its side.
     skip_alive: if True, skip the ICMP reachability check (useful for
                 cloud hosts that block ping, or when re-scanning a
                 system that is already known to be reachable).
@@ -5005,6 +5105,9 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                 time on hosts the user has already confirmed).
     """
     landscape = []
+    # Opt-in SNC context bundle (SAPMAP issue #220).  None unless a caller
+    # supplied one; stamped onto the discovered systems just before return.
+    _scan_creds = normalize_scan_creds(creds)
 
     has_progress = HAS_RICH
 
@@ -5824,6 +5927,9 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                 print("[*]   Separated SAP system %s with instances: %s" % (
                     sid, ", ".join(i.instance_nr for i in inst_group)))
 
+    # SAPMAP issue #220 — thread the opt-in SNC partner context onto the
+    # discovered systems (no-op when no creds bundle was supplied).
+    stamp_snc_context(landscape, _scan_creds)
     return landscape
 
 
@@ -5871,11 +5977,22 @@ def _get_instance_p4_ports(inst):
 
 def assess_vulnerabilities(landscape, gw_cmd="whoami", timeout=5, verbose=False,
                            url_scan=False, url_scan_threads=25, cancel_check=None,
-                           default_creds=False):
+                           default_creds=False, creds=None):
     """Phase 2: Run vulnerability checks against discovered systems.
 
     cancel_check: callable returning True when scan should be aborted.
+    creds: optional opt-in credential/context bundle (ScanCreds, dict, or
+                None — see :class:`ScanCreds`, SAPMAP issue #220).  Opt-in
+                and byte-for-byte unchanged when ``None``.  When supplied it
+                carries the operator's SNC partner context forward onto the
+                assessed systems (idempotent — covers a landscape that was
+                discovered without the bundle), so the caller's SNC-aware
+                post-processing sees it regardless of which phase was given
+                the creds.
     """
+    # SAPMAP issue #220 — opt-in SNC context carry-through (metadata only).
+    _scan_creds = normalize_scan_creds(creds)
+    stamp_snc_context(landscape, _scan_creds)
 
     def cancelled():
         return cancel_check and cancel_check()
