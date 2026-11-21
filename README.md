@@ -372,6 +372,23 @@ The BTP Cloud Scanner tests for the following security issues:
 | BTP-INFO-002 | LOW | Server version information disclosed |
 | BTP-INFO-003 | HIGH | Debug/trace mode enabled in production |
 
+## Library / SAPMAP Integration
+
+SAPology is also used as a library by [SAPMAP](https://github.com/SecuritySilverbacks/SAPMAP), which calls `discover_systems()` and `assess_vulnerabilities()` directly for its deep-scan path.
+
+Both entry points accept an **optional, opt-in `creds` bundle** (a `ScanCreds`, a plain `dict`, or `None`). With `creds=None` — the default — discovery and assessment are **byte-for-byte unchanged** (no-creds behaviour). When a bundle is supplied, SAPology threads the operator's SNC partner name onto every discovered system (`SAPSystem.snc_partnername` / `snc_creds_supplied`):
+
+```python
+import SAPology
+landscape = SAPology.discover_systems(
+    targets, instances,
+    creds={"user": "SAPMAP00", "password": "…",
+           "snc_partnername": "p:CN=S4H", "snc_config": {…}},
+)
+```
+
+SAPology deliberately does **not** perform the SNC handshake itself (it has no SNC transport or looted-PSE wallet — that machinery lives in the caller). The bundle lets a caller that owns the wallet (SAPMAP) run an authenticated SNC probe on its side using the stamped `snc_partnername`. See `ScanCreds` in `SAPology.py`. (SAPMAP issue #220.)
+
 ## Disclaimer
 
 This tool is intended for **authorized security testing and assessment only**. Only use SAPology against systems you have explicit permission to test. Unauthorized scanning of computer systems is illegal in most jurisdictions.
