@@ -130,6 +130,22 @@ class TestSAPSystem(unittest.TestCase):
             s.instances.append(inst)
         self.assertEqual(len(s.all_findings()), 3)
 
+    def test_host_control_ports_default_empty(self):
+        # SAPMAP #242: new field defaults to {} so no-agent discovery is
+        # byte-for-byte unchanged.
+        self.assertEqual(SAPSystem().host_control_ports, {})
+
+    def test_host_control_ports_to_dict_string_keys(self):
+        s = SAPSystem(sid="TST")
+        s.host_control_ports = {1128: "SAPHostControl HTTP",
+                                1129: "SAPHostControl HTTPS"}
+        d = s.to_dict()
+        self.assertIn("host_control_ports", d)
+        # JSON-safe: int port keys serialized as strings.
+        self.assertEqual(d["host_control_ports"],
+                         {"1128": "SAPHostControl HTTP",
+                          "1129": "SAPHostControl HTTPS"})
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. parse_instance_range
@@ -561,6 +577,67 @@ class TestNonSslHttpFinding(unittest.TestCase):
         findings = self._run_assess(inst)
         names = [f.name for f in findings]
         self.assertNotIn("Unencrypted SAP HTTP Service Exposed", names)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 9b. SAP Host Agent (SAPHostControl) port extraction — SAPMAP #242
+#     The extraction runs inside discover_systems. We test the logic directly
+#     by replicating the exact port-grouping algorithm (1128/1129 -> a
+#     host-level host_control_ports map, never folded onto a SAP instance).
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _group_ports(open_ports):
+    """Replicate the host-control + XX extraction from discover_systems.
+    ``open_ports`` = {port: {"instance": str, "description": str}}.
+    Returns (instance_ports, host_control_ports)."""
+    instance_ports = {}
+    xx_ports = {}
+    host_control_ports = {}
+    for port, info in open_ports.items():
+        inst = info["instance"]
+        if port in (1128, 1129):
+            host_control_ports[port] = info["description"]
+            continue
+        if inst == "XX":
+            inst = SAPology.deduce_instance(port)
+        if inst == "XX":
+            xx_ports[port] = info["description"]
+        else:
+            instance_ports.setdefault(inst, {})[port] = info["description"]
+    if xx_ports and instance_ports:
+        first_inst = sorted(instance_ports.keys())[0]
+        instance_ports[first_inst].update(xx_ports)
+    elif xx_ports:
+        instance_ports["XX"] = xx_ports
+    return instance_ports, host_control_ports
+
+
+class TestHostControlExtraction(unittest.TestCase):
+    def test_host_agent_ports_go_to_host_control_not_instance(self):
+        open_ports = {
+            3200: {"instance": "00", "description": "SAP Dispatcher"},
+            1128: {"instance": "XX", "description": "SAPHostControl HTTP"},
+            1129: {"instance": "XX", "description": "SAPHostControl HTTPS"},
+        }
+        instance_ports, hc = _group_ports(open_ports)
+        self.assertEqual(hc, {1128: "SAPHostControl HTTP",
+                              1129: "SAPHostControl HTTPS"})
+        all_inst_ports = set()
+        for ports in instance_ports.values():
+            all_inst_ports.update(ports.keys())
+        self.assertNotIn(1128, all_inst_ports)
+        self.assertNotIn(1129, all_inst_ports)
+        self.assertIn(3200, all_inst_ports)
+
+    def test_host_agent_only_host_has_no_instance_ports(self):
+        open_ports = {
+            1128: {"instance": "XX", "description": "SAPHostControl HTTP"},
+            1129: {"instance": "XX", "description": "SAPHostControl HTTPS"},
+        }
+        instance_ports, hc = _group_ports(open_ports)
+        self.assertEqual(hc, {1128: "SAPHostControl HTTP",
+                              1129: "SAPHostControl HTTPS"})
+        self.assertEqual(instance_ports, {})
 
 
 # ═══════════════════════════════════════════════════════════════════════════
