@@ -152,7 +152,7 @@ except ImportError:
 # gateway (48NN) coverage (SAPMAP #247).  Callers feature-detect capabilities
 # by signature/attribute presence (robust across un-versioned older checkouts)
 # and use this string only for logging / display.
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -930,11 +930,19 @@ def build_port_list(instances, quick=False):
                 p = 50000 + inst_nr * 100 + offset
                 if p not in NON_SAP_PORTS and p not in SAP_FIXED_PORTS:
                     ports.append((p, "sap_5xx", inst_str, "SAP 5%02d%02d" % (inst_nr, offset)))
-            # HANA SQL ports: 3NN13 (SystemDB), 3NN15 (first tenant)
+            # HANA SQL ports (SAPMAP issue #249):
+            #   3NN13 = SystemDB (MDC) — the system-database SQL endpoint.
+            #           On a single-container install this port is not used.
+            #   3NN15 = single-container indexserver — the per-host index-
+            #           server's SQL endpoint on a single-container install
+            #           (or the MDC compat endpoint).  This is NOT a tenant
+            #           port: true MDC tenant SQL ports are DYNAMIC (3NN41+,
+            #           assigned by HANA, readable via M_SERVICES) and
+            #           cannot be computed from the instance number.
             hana_sysdb = 30000 + inst_nr * 100 + 13
-            hana_tenant = 30000 + inst_nr * 100 + 15
-            for hp, hdesc in ((hana_sysdb, "HANA SQL SystemDB"),
-                              (hana_tenant, "HANA SQL Tenant")):
+            hana_indexserver = 30000 + inst_nr * 100 + 15
+            for hp, hdesc in ((hana_sysdb, "HANA SQL SystemDB (MDC)"),
+                              (hana_indexserver, "HANA SQL single-container indexserver")):
                 if hp not in NON_SAP_PORTS and hp not in SAP_FIXED_PORTS:
                     ports.append((hp, "hana_sql", inst_str, hdesc))
     if quick:

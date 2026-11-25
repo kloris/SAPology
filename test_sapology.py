@@ -309,7 +309,29 @@ class TestBuildPortList(unittest.TestCase):
     def test_hana_sql_ports_in_full_mode(self):
         full = set(t[0] for t in build_port_list([0]))
         self.assertIn(30013, full)  # HANA SystemDB instance 00
-        self.assertIn(30015, full)  # HANA Tenant instance 00
+        self.assertIn(30015, full)  # HANA single-container indexserver (NOT tenant)
+
+    def test_hana_port_labels_correct(self):
+        """3NN13 = SystemDB (MDC); 3NN15 = single-container indexserver
+        (NOT 'tenant' — real MDC tenant SQL ports 3NN41+ are dynamic).
+
+        SAPMAP issue #249: the deep-scan path copies these labels into
+        the engagement report verbatim, so a wrong label here shows up
+        as a wrong label in the operator's PDF.
+        """
+        full = build_port_list([0])
+        labels = {port: desc for (port, _svc, _inst, desc) in full}
+        self.assertEqual(labels.get(30013), "HANA SQL SystemDB (MDC)")
+        self.assertEqual(labels.get(30015),
+                         "HANA SQL single-container indexserver")
+        # Guard against regression: no HANA port label should say
+        # "tenant" — the correct SAP label for 3NN41+ is dynamic.
+        for port, desc in labels.items():
+            if 30000 <= port < 40000 and "HANA" in (desc or ""):
+                self.assertNotIn("tenant", desc.lower(),
+                                 msg="HANA label %r at port %d says "
+                                     "'tenant' — see SAPMAP #249"
+                                     % (desc, port))
 
     def test_icm_https_uses_443NN(self):
         # Instance 01 ICM HTTPS = 44301 (443NN), NOT the old incorrect 4301 (#247)
