@@ -150,7 +150,7 @@ except ImportError:
 # feature-detect the capability by the presence of the ``creds`` kwarg in
 # the signature (robust across un-versioned older checkouts) and use this
 # string only for logging / display.
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -638,6 +638,12 @@ class SAPSystem:
     # stays byte-for-byte unchanged.
     snc_partnername: str = ""
     snc_creds_supplied: bool = False
+    # SAPMAP issue #242 — SAP Host Agent (SAPHostControl, TCP 1128/1129) is a
+    # HOST-level management service, not a SAP application instance.  Its ports
+    # are recorded here instead of being folded onto an instance's port map, so
+    # a consumer can treat Host Control as its own entity.  Empty unless the
+    # host exposes the agent, so no-agent discovery stays unchanged.
+    host_control_ports: Dict[int, str] = field(default_factory=dict)
 
     def highest_severity(self) -> Optional[Severity]:
         sev = None
@@ -675,6 +681,7 @@ class SAPSystem:
             "is_known": self.is_known,
             "snc_partnername": self.snc_partnername,
             "snc_creds_supplied": self.snc_creds_supplied,
+            "host_control_ports": {str(k): v for k, v in self.host_control_ports.items()},
         }
 
 
@@ -5306,8 +5313,16 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
         # Group ports by instance
         instance_ports = {}
         xx_ports = {}  # ports we couldn't map to an instance
+        host_control_ports = {}  # SAP Host Agent 1128/1129 — host-level (SAPMAP #242)
         for port, info in open_ports.items():
             inst = info["instance"]
+            # SAP Host Agent (SAPHostControl, 1128/1129) is a host-level
+            # management service, not a SAP application instance — record it
+            # separately so it is never folded onto an instance's port map
+            # (which mis-attributes a host service to one SAP system).
+            if port in (1128, 1129):
+                host_control_ports[port] = info["description"]
+                continue
             if inst == "XX":
                 inst = deduce_instance(port)
             if inst == "XX":
@@ -5333,6 +5348,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
 
         # Create SAP system and instances
         sys_obj = SAPSystem(hostname=hostname)
+        sys_obj.host_control_ports = dict(host_control_ports)
         sid_found = False
 
         for inst_nr, ports in sorted(instance_ports.items()):
@@ -5863,7 +5879,10 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
         # HTTP servers on ports 443/8080).
         if not sys_obj.kernel and sys_obj.sid == "UNKNOWN":
             has_any_service = any(inst.services for inst in sys_obj.instances)
-            if not has_any_service:
+            # Keep a host that exposes ONLY the SAP Host Agent — it is still a
+            # real finding (host-level management service) and is reported as a
+            # host-control entity rather than a SAP system (SAPMAP #242).
+            if not has_any_service and not sys_obj.host_control_ports:
                 log_verbose("  Skipping %s (%s): no SAP services confirmed" % (
                     target_ip, sys_obj.hostname))
                 continue
@@ -5888,6 +5907,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
         else:
             # Multiple SAP systems on the same host — split into separate
             # SAPSystem objects so each is reported independently.
+            first_split = True
             for sid, inst_group in sid_groups.items():
                 new_sys = SAPSystem(
                     sid=sid,
@@ -5902,6 +5922,11 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                     relationships=[r for r in sys_obj.relationships
                                    if r.get("sid", "") == sid or r.get("sid", "") == ""],
                 )
+                # The Host Agent is host-level (one per box) — attach it to the
+                # first split system only so it is not double-counted (#242).
+                if first_split:
+                    new_sys.host_control_ports = dict(sys_obj.host_control_ports)
+                    first_split = False
                 # Override system-level properties from this group's instances
                 # when available, since they may differ between systems.
                 for inst in inst_group:
