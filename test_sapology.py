@@ -209,8 +209,24 @@ class TestDeduceInstance(unittest.TestCase):
         self.assertEqual(deduce_instance(8001), "01")
 
     def test_icm_https_range(self):
-        self.assertEqual(deduce_instance(4300), "00")
-        self.assertEqual(deduce_instance(4301), "01")
+        # ICM HTTPS is 443NN (44300 + NN).  44300 itself is a fixed port
+        # (-> XX, covered by test_fixed_ports_return_xx); instances 01+ map here.
+        self.assertEqual(deduce_instance(44301), "01")
+        self.assertEqual(deduce_instance(44315), "15")
+        # The former 4300-based mapping was the ICM-HTTPS base bug (#247);
+        # 43NN is HANA's bundled Web Dispatcher, not ICM, and is not scanned.
+        self.assertEqual(deduce_instance(4300), "XX")
+        self.assertEqual(deduce_instance(4301), "XX")
+
+    def test_external_message_server_range(self):
+        # sapms<SID> external Message Server = 36NN (#247)
+        self.assertEqual(deduce_instance(3600), "00")
+        self.assertEqual(deduce_instance(3610), "10")
+
+    def test_gateway_snc_range(self):
+        # Secured/SNC gateway sapgw<NN>s = 48NN (#247)
+        self.assertEqual(deduce_instance(4800), "00")
+        self.assertEqual(deduce_instance(4801), "01")
 
     def test_ms_http_range(self):
         self.assertEqual(deduce_instance(8100), "00")
@@ -295,6 +311,29 @@ class TestBuildPortList(unittest.TestCase):
         self.assertIn(30013, full)  # HANA SystemDB instance 00
         self.assertIn(30015, full)  # HANA Tenant instance 00
 
+    def test_icm_https_uses_443NN(self):
+        # Instance 01 ICM HTTPS = 44301 (443NN), NOT the old incorrect 4301 (#247)
+        ports = set(t[0] for t in build_port_list([1]))
+        self.assertIn(44301, ports)
+        self.assertNotIn(4301, ports)
+
+    def test_external_ms_and_snc_gateway_present(self):
+        # Deep-scan parity with the fast scanner (#247)
+        full0 = set(t[0] for t in build_port_list([0]))
+        self.assertIn(3600, full0)   # sapms<SID> external Message Server = 36NN
+        self.assertIn(4800, full0)   # sapgw<NN>s SNC gateway = 48NN
+        full1 = set(t[0] for t in build_port_list([1]))
+        self.assertIn(3601, full1)
+        self.assertIn(4801, full1)
+
+    def test_new_ports_carry_correct_labels(self):
+        # Port NUMBER alone is not enough — the (service, description) a port
+        # carries is what the topology diagram shows, so pin it here (#247).
+        by_port = {t[0]: (t[1], t[3]) for t in build_port_list([1])}
+        self.assertEqual(by_port[44301], ("icm_https", "ICM HTTPS"))
+        self.assertEqual(by_port[3601], ("sapms", "Message Server"))
+        self.assertEqual(by_port[4801], ("gateway_snc", "SAP Gateway (SNC)"))
+
     def test_multiple_instances(self):
         result = build_port_list([0, 1, 2])
         ports = [t[0] for t in result]
@@ -309,6 +348,63 @@ class TestBuildPortList(unittest.TestCase):
         ports = set(t[0] for t in result)
         for fixed in SAP_FIXED_PORTS:
             self.assertIn(fixed, ports)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4b. discover_systems port -> label classification dispatch (#247)
+#     Drives the REAL discover_systems (scan + fingerprint mocked) so the
+#     port->instance->label pipeline and the SNC-gateway exclusion guard are
+#     covered end to end, not just at the two ends (build_port_list / assess).
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestDiscoverSystemsPortClassification(unittest.TestCase):
+    def test_snc_gateway_excluded_and_labels_preserved(self):
+        # A single instance exposing a plaintext gateway (33NN), an SNC gateway
+        # (48NN) and the external Message Server (36NN).
+        canned = {
+            3301: {"service": "gateway",     "instance": "01",
+                   "description": "SAP Gateway"},
+            4801: {"service": "gateway_snc", "instance": "01",
+                   "description": "SAP Gateway (SNC)"},
+            3601: {"service": "sapms",        "instance": "01",
+                   "description": "Message Server"},
+        }
+        with patch.object(SAPology, "scan_sap_ports",
+                          lambda *a, **k: dict(canned)), \
+             patch.object(SAPology, "fingerprint_gateway",
+                          return_value={"accessible": True,
+                                        "response_len": 0}) as gw_mock, \
+             patch.object(SAPology, "HAS_RFC_SYSINFO", False), \
+             patch.object(SAPology, "HAS_CLIENT_ENUM", False), \
+             patch.object(SAPology, "HAS_RICH", False), \
+             patch.object(SAPology.socket, "gethostbyaddr",
+                          side_effect=socket.herror):
+            landscape = SAPology.discover_systems(
+                ["10.0.0.1"], [1], timeout=1, threads=1,
+                client_enum=False, skip_alive=True)
+
+        self.assertEqual(len(landscape), 1)
+        inst = landscape[0].instances[0]
+
+        # Every scanned port reaches the instance with its description intact.
+        self.assertEqual(inst.ports.get(3301), "SAP Gateway")
+        self.assertEqual(inst.ports.get(4801), "SAP Gateway (SNC)")
+        self.assertEqual(inst.ports.get(3601), "Message Server")
+
+        # The plaintext gateway probe ran for the 33NN gateway but NOT for the
+        # 48NN SNC port (the "SNC not in svc_desc" guard).
+        probed = set()
+        for c in gw_mock.call_args_list:
+            probed.add(c.args[1] if len(c.args) > 1 else c.kwargs.get("port"))
+        self.assertIn(3301, probed)
+        self.assertNotIn(4801, probed)
+
+        # The real gateway service must point at 33NN, never overwritten by the
+        # SNC port, and sapms (36NN) stays a plain recorded port (no service).
+        self.assertEqual(inst.services.get("gateway", {}).get("port"), 3301)
+        self.assertNotIn(4801,
+                         [v.get("port") for v in inst.services.values()
+                          if isinstance(v, dict)])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -518,7 +614,7 @@ class TestNonSslHttpFinding(unittest.TestCase):
 
     @_patch_all_network
     def test_icm_https_does_not_trigger(self, *mocks):
-        inst = self._make_inst_with_ports({4300: "ICM HTTPS"})
+        inst = self._make_inst_with_ports({44301: "ICM HTTPS"})
         findings = self._run_assess(inst)
         names = [f.name for f in findings]
         self.assertNotIn("Unencrypted SAP HTTP Service Exposed", names)
@@ -570,7 +666,7 @@ class TestNonSslHttpFinding(unittest.TestCase):
     @_patch_all_network
     def test_only_https_ports_no_finding(self, *mocks):
         inst = self._make_inst_with_ports({
-            4300: "ICM HTTPS",
+            44301: "ICM HTTPS",
             443: "HTTPS",
             8443: "HTTPS (alt)",
         })
@@ -880,8 +976,9 @@ class TestCheckCve202241272(unittest.TestCase):
 
 class TestSapPortsConstants(unittest.TestCase):
     def test_sap_ports_has_expected_services(self):
-        for svc in ("dispatcher", "gateway", "ms_http", "icm_http",
-                    "icm_https", "sapcontrol", "j2ee_http", "ms_internal"):
+        for svc in ("dispatcher", "gateway", "gateway_snc", "sapms",
+                    "ms_http", "icm_http", "icm_https", "sapcontrol",
+                    "j2ee_http", "ms_internal"):
             self.assertIn(svc, SAP_PORTS, msg="SAP_PORTS missing key: %s" % svc)
 
     def test_sap_ports_values_are_tuples(self):
@@ -894,6 +991,30 @@ class TestSapPortsConstants(unittest.TestCase):
 
     def test_gateway_base_port(self):
         self.assertEqual(SAP_PORTS["gateway"][0], 3300)
+
+    def test_icm_https_base_port(self):
+        # 443NN (44300 + NN), not the former incorrect 4300 (#247)
+        self.assertEqual(SAP_PORTS["icm_https"][0], 44300)
+
+    def test_external_ms_and_snc_gateway_base_ports(self):
+        self.assertEqual(SAP_PORTS["sapms"][0], 3600)        # 36NN
+        self.assertEqual(SAP_PORTS["gateway_snc"][0], 4800)  # 48NN
+
+    def test_gateway_snc_description_marks_snc(self):
+        # discover_systems excludes the SNC gateway from the plaintext gateway
+        # probe via `"Gateway" in svc_desc and "SNC" not in svc_desc` (#247).
+        # The description MUST contain "SNC" for that guard to hold.
+        desc = SAP_PORTS["gateway_snc"][1]
+        self.assertIn("Gateway", desc)
+        self.assertIn("SNC", desc)
+
+    def test_sapms_description_does_not_collide(self):
+        # The external Message Server (36NN) must fall through the dispatch
+        # cleanly: its description must NOT contain "HTTP" (would hit the ICM
+        # branch) or "Internal" (would hit the MS-internal branch) (#247).
+        desc = SAP_PORTS["sapms"][1]
+        self.assertNotIn("HTTP", desc)
+        self.assertNotIn("Internal", desc)
 
     def test_fixed_ports_has_443(self):
         self.assertIn(443, SAP_FIXED_PORTS)
