@@ -146,11 +146,13 @@ except ImportError:
 
 # Module version.  1.1.0 is the first release to accept the opt-in
 # ``creds`` bundle on ``discover_systems`` / ``assess_vulnerabilities``
-# (SAPMAP issue #220); 1.0.x builds had no ``creds`` parameter.  Callers
-# feature-detect the capability by the presence of the ``creds`` kwarg in
-# the signature (robust across un-versioned older checkouts) and use this
-# string only for logging / display.
-__version__ = "1.2.0"
+# (SAPMAP issue #220); 1.0.x builds had no ``creds`` parameter.  1.2.0 added
+# ``SAPSystem.host_control_ports`` (SAPMAP #242).  1.3.0 corrects the ICM
+# HTTPS port scheme to 443NN and adds external Message Server (36NN) + SNC
+# gateway (48NN) coverage (SAPMAP #247).  Callers feature-detect capabilities
+# by signature/attribute presence (robust across un-versioned older checkouts)
+# and use this string only for logging / display.
+__version__ = "1.3.0"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -214,9 +216,14 @@ def print_banner():
 SAP_PORTS = {
     "dispatcher":     (3200, "SAP Dispatcher (DIAG)"),
     "gateway":        (3300, "SAP Gateway"),
+    "gateway_snc":    (4800, "SAP Gateway (SNC)"),   # sapgw<NN>s = 48NN (secured/SNC RFC)
+    "sapms":          (3600, "Message Server"),      # sapms<SID> = 36NN (external MS; SAP GUI logon groups)
     "ms_http":        (8100, "Message Server HTTP"),
     "icm_http":       (8000, "ICM HTTP"),
-    "icm_https":      (4300, "ICM HTTPS"),
+    # ICM HTTPS is 443NN (44300 + NN) per SAP Help "TCP/IP Ports of All SAP
+    # Products".  (43NN/4300 is HANA's bundled Web Dispatcher HTTPS range, a
+    # different service — do not use it here.)
+    "icm_https":      (44300, "ICM HTTPS"),
     "sapcontrol":     (50013, "SAPControl SOAP (HTTP)"),
     "sapcontrol_s":   (50014, "SAPControl SOAP (HTTPS)"),
     "j2ee_http":      (50000, "J2EE HTTP"),
@@ -1012,12 +1019,19 @@ def deduce_instance(port):
         return "%02d" % (port - 3200)
     if 3300 <= port <= 3399:
         return "%02d" % (port - 3300)
+    if 4800 <= port <= 4899:          # SNC gateway sapgw<NN>s = 48NN
+        return "%02d" % (port - 4800)
+    if 3600 <= port <= 3699:          # external Message Server sapms<SID> = 36NN
+        return "%02d" % (port - 3600)
     if 3900 <= port <= 3999:
         return "%02d" % (port - 3900)
     if 8000 <= port <= 8099:
         return "%02d" % (port - 8000)
-    if 4300 <= port <= 4399:
-        return "%02d" % (port - 4300)
+    # ICM HTTPS is 443NN (44300 + NN); 44300 itself is a fixed port and returns
+    # XX via the SAP_FIXED_PORTS guard above.  The former 4300-4399 branch was
+    # the ICM-HTTPS base bug (43NN is HANA's bundled Web Dispatcher, not ICM).
+    if 44300 <= port <= 44399:
+        return "%02d" % (port - 44300)
     if 8100 <= port <= 8199:
         return "%02d" % (port - 8100)
     if 50000 <= port <= 59999:
@@ -5416,7 +5430,7 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
 
                 # ICM HTTP
                 elif "ICM HTTP" in svc_desc or "HTTP" in svc_desc:
-                    use_ssl = "HTTPS" in svc_desc or port in (443, 8443) or (inst_nr.isdigit() and port == 4300 + int(inst_nr))
+                    use_ssl = "HTTPS" in svc_desc or port in (443, 8443) or (inst_nr.isdigit() and port == 44300 + int(inst_nr))
                     print("[*]   Querying ICM on port %d (ssl=%s) ..." % (port, use_ssl))
 
                     pub_info = query_sap_public_info(target_ip, port, use_ssl, timeout)
@@ -5515,8 +5529,12 @@ def discover_systems(targets, instances, timeout=3, threads=20, verbose=False,
                             log_verbose("  BusinessObjects web detected on port %d (%s)"
                                         % (port, bo_info.get("path", "")))
 
-                # Gateway
-                elif "Gateway" in svc_desc:
+                # Gateway (plaintext 33NN).  The SNC gateway (48NN, desc "SAP
+                # Gateway (SNC)") is excluded here: SNC rejects the plaintext
+                # NOOP / RFC_SYSTEM_INFO probes below, and a stray plaintext
+                # response could overwrite the real 33NN gateway entry.  The
+                # 48NN port is still recorded in instance.ports (#247).
+                elif "Gateway" in svc_desc and "SNC" not in svc_desc:
                     print("[*]   Checking gateway on port %d ..." % port)
                     gw_info = fingerprint_gateway(target_ip, port, timeout)
                     if gw_info.get("accessible"):
